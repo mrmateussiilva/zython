@@ -6,8 +6,17 @@ class Greeter:
         print("Hello, " + self.name)
 
 
-g = Greeter("World")
-g.greet()
+def message(msg):
+    print(msg)
 
-g.name = "Zython"
-g.greet()
+
+c = 0
+while c < 10:
+    print(c)
+    c = c + 1
+
+# g = Greeter("World")
+# g.greet()
+
+# g.name = "Zython"
+# g.greet()
