@@ -188,6 +188,7 @@ pub const Lexer = struct {
         else if (std.mem.eql(u8, text, "for")) TokenType.For
         else if (std.mem.eql(u8, text, "def")) TokenType.Fun
         else if (std.mem.eql(u8, text, "if")) TokenType.If
+        else if (std.mem.eql(u8, text, "in")) TokenType.In
         else if (std.mem.eql(u8, text, "None")) TokenType.Nil
         else if (std.mem.eql(u8, text, "or")) TokenType.Or
         else if (std.mem.eql(u8, text, "print")) TokenType.Print

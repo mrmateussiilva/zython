@@ -140,6 +140,11 @@ pub const Stmt = union(enum) {
         condition: Expr,
         body: *const Stmt,
     },
+    For: struct {
+        variable: []const u8,
+        iterable: Expr,
+        body: *const Stmt,
+    },
     Function: struct {
         name: []const u8,
         params: []const []const u8,

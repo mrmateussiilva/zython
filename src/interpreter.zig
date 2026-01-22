@@ -120,6 +120,17 @@ pub const Interpreter = struct {
                 }
                 return null;
             },
+            .For => |f| {
+                const iterable = try self.evaluate(f.iterable);
+                if (iterable != .List) return InterpreterError.TypeError;
+
+                const list = iterable.List;
+                for (list.elements.items) |item| {
+                    try self.environment.define(f.variable, item);
+                    if (try self.execute(f.body.*)) |ret| return ret;
+                }
+                return null;
+            },
             .Function => |s| {
                 const func = Value{ .Function = .{ 
                     .name = s.name,

@@ -123,6 +123,7 @@ pub const Parser = struct {
     fn statement(self: *Parser) ParserError!Stmt {
         if (try self.match(&.{.If})) return try self.ifStatement();
         if (try self.match(&.{.While})) return try self.whileStatement();
+        if (try self.match(&.{.For})) return try self.forStatement();
         if (try self.match(&.{.Return})) return try self.returnStatement();
         if (try self.match(&.{.Print})) return try self.printStatement();
         
@@ -162,6 +163,23 @@ pub const Parser = struct {
 
         return Stmt{ .While = .{
             .condition = condition,
+            .body = bodyPtr,
+        }};
+    }
+
+    fn forStatement(self: *Parser) ParserError!Stmt {
+        const variable = try self.consume(.Identifier, "Expect variable name after 'for'.");
+        _ = try self.consume(.In, "Expect 'in' after variable.");
+        const iterable = try self.expression();
+        _ = try self.consume(.Colon, "Expect ':' after iterable.");
+        
+        const bodyStatements = try self.block();
+        const bodyPtr = try self.allocator.create(Stmt);
+        bodyPtr.* = Stmt{ .Block = .{ .statements = bodyStatements } };
+
+        return Stmt{ .For = .{
+            .variable = variable.lexeme,
+            .iterable = iterable,
             .body = bodyPtr,
         }};
     }
