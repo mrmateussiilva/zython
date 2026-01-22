@@ -11,7 +11,6 @@ pub const InterpreterError = error{
     UndefinedVariable,
     Return, 
     OutOfMemory,
-    // We will use a special way to handle returns or just manage it via return types
 };
 
 const Environment = struct {
@@ -47,13 +46,6 @@ const Environment = struct {
             try enc.assign(name, value);
             return;
         }
-        // Implicit global declaration in Python if not found? 
-        // No, typically UnboundLocalError or NameError.
-        // But for simplicity, let's just define it in current scope if it's a global assignment?
-        // Actually, Python behavior: assignment defines in local scope unless 'global' keyword used.
-        // Since we don't have 'global' keyword, we'll treat all assignments as definitions in current scope.
-        // Wait, AST 'Var' is used for assignment in my parser.
-        // So Stmt.Var should just call define().
         return InterpreterError.UndefinedVariable;
     }
 
@@ -83,14 +75,6 @@ pub const Interpreter = struct {
     }
 
     pub fn deinit(self: *Interpreter) void {
-        // We need to free all environments. 
-        // Simple GC or manual management? 
-        // For this simple impl, we might leak if we don't track them.
-        // But 'globals' is the root.
-        // 'environment' points to current.
-        // We should traverse up to globals or keep a list.
-        // For MVP, just deinit globals (and accept leaks for now or handle better).
-        // Ideally, we deinit when scope ends.
         self.globals.deinit();
     }
 
@@ -100,7 +84,6 @@ pub const Interpreter = struct {
         }
     }
 
-    // Returns ?Value. If non-null, it's a return value.
     fn execute(self: *Interpreter, stmt: Stmt) InterpreterError!?Value {
         switch (stmt) {
             .Print => |s| {
@@ -138,13 +121,38 @@ pub const Interpreter = struct {
                 return null;
             },
             .Function => |s| {
-                const func = Value{ .Function = .{
+                const func = Value{ .Function = .{ 
                     .name = s.name,
                     .params = s.params,
                     .body = s.body,
-                    // .closure = self.environment, // TODO: Capture closure if we want proper closures
+                    .closure = self.environment,
                 }};
                 try self.environment.define(s.name, func);
+                return null;
+            },
+            .Class => |c| {
+                const klass = try self.allocator.create(AST.LoxClass);
+                klass.* = AST.LoxClass{
+                    .name = c.name,
+                    .methods = std.StringHashMap(Value).init(self.allocator),
+                };
+
+                try self.environment.define(c.name, Value{ .Class = klass });
+
+                for (c.methods) |methodStmt| {
+                     switch (methodStmt) {
+                         .Function => |f| {
+                             const funcVal = Value{ .Function = .{ 
+                                 .name = f.name,
+                                 .params = f.params,
+                                 .body = f.body,
+                                 .closure = self.environment,
+                             }};
+                             try klass.methods.put(f.name, funcVal);
+                         },
+                         else => unreachable,
+                     }
+                }
                 return null;
             },
             .Return => |s| {
@@ -161,9 +169,6 @@ pub const Interpreter = struct {
         self.environment = env;
         defer {
             self.environment = previous;
-            // env.deinit(); // Can be dealloc here, assuming no closures escaping?
-            // If closures escape, we can't dealloc. For now, let's leak to be safe or investigate.
-            // In a real language, GC handles this.
         }
 
         for (statements) |stmt| {
@@ -198,8 +203,8 @@ pub const Interpreter = struct {
                     .Add => {
                         if (left == .Number and right == .Number) return Value{ .Number = left.Number + right.Number };
                         if (left == .String and right == .String) {
-                            // TODO concat
-                            return InterpreterError.TypeError; 
+                            const res = try std.fmt.allocPrint(self.allocator, "{s}{s}", .{left.String, right.String});
+                            return Value{ .String = res };
                         }
                         return InterpreterError.TypeError;
                     },
@@ -250,39 +255,119 @@ pub const Interpreter = struct {
             },
             .Call => |c| {
                 const callee = try self.evaluate(c.callee.*);
-                
-                // Check if it's a function
-                switch (callee) {
-                    .Function => |func| {
-                        if (c.arguments.len != func.params.len) {
-                            std.debug.print("Expected {d} arguments but got {d}.\n", .{func.params.len, c.arguments.len});
-                            return InterpreterError.RuntimeError;
+                const args = c.arguments;
+                return self.callValue(callee, args);
+            },
+            .Get => |g| {
+                const obj = try self.evaluate(g.object.*);
+                switch (obj) {
+                    .Instance => |inst| {
+                        if (inst.fields.get(g.name)) |val| return val;
+                        if (inst.klass.methods.get(g.name)) |method| {
+                             return self.bindMethod(inst, method);
                         }
-
-                        // Create environment for function call
-                        // Use globals as parent for now to simulate simple scoping (or capture closure if implemented)
-                        // Ideally: parent = func.closure
-                        const fnEnv = Environment.init(self.allocator, self.globals) catch return InterpreterError.OutOfMemory; 
-
-                        for (func.params, 0..) |param, i| {
-                            const argVal = try self.evaluate(c.arguments[i]);
-                            try fnEnv.define(param, argVal);
-                        }
-
-                        const ret = try self.executeBlock(func.body, fnEnv);
-                        if (ret) |val| return val;
-                        return Value{ .Nil = {} };
-                    },
-                    else => {
-                        std.debug.print("Can only call functions.\n", .{});
                         return InterpreterError.RuntimeError;
-                    }
+                    },
+                    else => return InterpreterError.TypeError,
                 }
+            },
+            .Set => |s| {
+                const obj = try self.evaluate(s.object.*);
+                switch (obj) {
+                    .Instance => |inst| {
+                        const val = try self.evaluate(s.value.*);
+                        try inst.fields.put(s.name, val);
+                        return val;
+                    },
+                    else => return InterpreterError.TypeError,
+                }
+            },
+            .This => |_| {
+                return self.environment.get("this");
             },
             .Variable => |name| {
                 return self.environment.get(name);
             }
         }
+    }
+
+    fn callValue(self: *Interpreter, callee: Value, args: []const Expr) InterpreterError!Value {
+         switch (callee) {
+            .Function => |func| {
+                var expected_params = func.params.len;
+                var param_offset: usize = 0;
+
+                var closure_env: ?*Environment = null;
+                if (func.closure) |c_opaque| {
+                    closure_env = @as(*Environment, @ptrCast(@alignCast(c_opaque)));
+                }
+
+                var actual_parent_env: *Environment = self.globals;
+                if (closure_env) |env| {
+                    actual_parent_env = env;
+                    if (env.values.contains("this")) {
+                        expected_params -= 1;
+                        param_offset = 1;
+                    }
+                }
+
+                if (args.len != expected_params) {
+                    std.debug.print("Expected {d} arguments but got {d}.\n", .{expected_params, args.len});
+                    return InterpreterError.RuntimeError;
+                }
+
+                const fnEnv = Environment.init(self.allocator, actual_parent_env) catch return InterpreterError.OutOfMemory; 
+
+                // If it's a bound method, the first parameter is 'self', and it's the instance.
+                if (param_offset == 1) { // Means it's a bound method, and we skipped 'self' param in check
+                    // The 'self' parameter needs to be defined as the instance itself.
+                    // Get the instance from actual_parent_env's "this"
+                    // It cannot be null if param_offset == 1, as that implies func.closure was not null.
+                    const instance_val = try actual_parent_env.get("this"); // Now safe to use
+                    try fnEnv.define(func.params[0], instance_val);
+                }
+
+                for (args, 0..) |arg_expr, i| {
+                    const argVal = try self.evaluate(arg_expr);
+                    try fnEnv.define(func.params[param_offset + i], argVal);
+                }
+
+                const ret = try self.executeBlock(func.body, fnEnv);
+                if (ret) |val| return val;
+                return Value{ .Nil = {} };
+            },
+            .Class => |klass| {
+                const instance = try self.allocator.create(AST.LoxInstance);
+                instance.* = AST.LoxInstance{
+                    .klass = klass,
+                    .fields = std.StringHashMap(Value).init(self.allocator),
+                };
+                const instVal = Value{ .Instance = instance };
+                
+                if (klass.methods.get("__init__")) |initializer| {
+                    const boundInit = try self.bindMethod(instance, initializer);
+                    _ = try self.callValue(boundInit, args);
+                }
+                
+                return instVal;
+            },
+            else => {
+                return InterpreterError.RuntimeError;
+            }
+        }
+    }
+
+    fn bindMethod(self: *Interpreter, instance: *AST.LoxInstance, method: Value) !Value {
+        const closure = @as(*Environment, @ptrCast(@alignCast(method.Function.closure.?)));
+        const env = try Environment.init(self.allocator, closure);
+        try env.define("this", Value{ .Instance = instance });
+        
+        return Value{ .Function = .{ 
+            .name = method.Function.name,
+            .params = method.Function.params,
+            .body = method.Function.body,
+            .closure = env,
+        }};
     }
 
     fn isTruthy(self: *Interpreter, value: Value) bool {
@@ -293,6 +378,8 @@ pub const Interpreter = struct {
             .Number => |n| return n != 0,
             .String => |s| return s.len > 0,
             .Function => return true,
+            .Class => return true,
+            .Instance => return true,
         }
     }
 
@@ -303,8 +390,10 @@ pub const Interpreter = struct {
              .Nil => return true,
              .Boolean => return a.Boolean == b.Boolean,
              .Number => return a.Number == b.Number,
-             .String => return std.mem.eql(u8, a.String, b.String), // TODO string interning or full compare
-             .Function => return false, // Functions are unequal unless same ref?
+             .String => return std.mem.eql(u8, a.String, b.String), 
+             .Function => return false, 
+             .Class => |c1| return c1 == b.Class,
+             .Instance => |inst1| return inst1 == b.Instance,
         }
     }
 };

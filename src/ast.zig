@@ -1,5 +1,16 @@
 const std = @import("std");
 
+// Forward declarations for runtime structures
+pub const LoxClass = struct {
+    name: []const u8,
+    methods: std.StringHashMap(Value),
+};
+
+pub const LoxInstance = struct {
+    klass: *LoxClass,
+    fields: std.StringHashMap(Value),
+};
+
 pub const Value = union(enum) {
     Nil: void,
     Boolean: bool,
@@ -9,7 +20,10 @@ pub const Value = union(enum) {
         name: []const u8,
         params: [][]const u8,
         body: []const Stmt,
+        closure: ?*anyopaque,
     },
+    Class: *LoxClass,
+    Instance: *LoxInstance,
     
     pub fn toString(self: Value, allocator: std.mem.Allocator) ![]u8 {
         switch (self) {
@@ -18,6 +32,8 @@ pub const Value = union(enum) {
             .Number => |n| return std.fmt.allocPrint(allocator, "{d}", .{n}),
             .String => |s| return try allocator.dupe(u8, s),
             .Function => |f| return try std.fmt.allocPrint(allocator, "<function {s}>", .{f.name}),
+            .Class => |c| return try std.fmt.allocPrint(allocator, "<class {s}>", .{c.name}),
+            .Instance => |i| return try std.fmt.allocPrint(allocator, "<{s} instance>", .{i.klass.name}),
         }
     }
 };
@@ -53,6 +69,18 @@ pub const Expr = union(enum) {
         callee: *const Expr,
         arguments: []const Expr,
     },
+    Get: struct {
+        object: *const Expr,
+        name: []const u8,
+    },
+    Set: struct {
+        object: *const Expr,
+        name: []const u8,
+        value: *const Expr,
+    },
+    This: struct {
+        keyword: []const u8,
+    },
     Literal: Value,
     Grouping: *const Expr,
     Variable: []const u8,
@@ -85,6 +113,10 @@ pub const Stmt = union(enum) {
         name: []const u8,
         params: [][]const u8,
         body: []const Stmt,
+    },
+    Class: struct {
+        name: []const u8,
+        methods: []const Stmt,
     },
     Return: struct {
         value: ?Expr,

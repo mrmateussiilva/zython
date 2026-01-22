@@ -34,7 +34,6 @@ pub const Parser = struct {
         self.previous = self.current;
         while (true) {
             self.current = try self.lexer.nextToken();
-            // std.debug.print("Token: {any} \'{s}\'\n", .{self.current.type, self.current.lexeme});
             if (self.current.type != .Error) break;
             // TODO: Report error
         }
@@ -76,8 +75,22 @@ pub const Parser = struct {
     }
 
     fn declaration(self: *Parser) ParserError!Stmt {
+        if (try self.match(&.{.Class})) return try self.classDeclaration();
         if (try self.match(&.{.Fun})) return try self.function("function");
         return try self.statement();
+    }
+
+    fn classDeclaration(self: *Parser) ParserError!Stmt {
+        const name = try self.consume(.Identifier, "Expect class name.");
+        // TODO: Inheritance (LeftParen)
+        _ = try self.consume(.Colon, "Expect ':' before class body.");
+
+        const body = try self.block();
+
+        return Stmt{ .Class = .{
+            .name = name.lexeme,
+            .methods = body,
+        }};
     }
 
     fn function(self: *Parser, kind: []const u8) ParserError!Stmt {
@@ -94,9 +107,9 @@ pub const Parser = struct {
                 if (!try self.match(&.{.Comma})) break;
             }
         }
-        _ = try self.consume(.RightParen, "Expect \')\' after parameters.");
+        _ = try self.consume(.RightParen, "Expect ')' after parameters.");
         
-        _ = try self.consume(.Colon, "Expect \':\' before function body.");
+        _ = try self.consume(.Colon, "Expect ':' before function body.");
         
         const body = try self.block();
         
@@ -118,16 +131,15 @@ pub const Parser = struct {
 
     fn ifStatement(self: *Parser) ParserError!Stmt {
         const condition = try self.expression();
-        _ = try self.consume(.Colon, "Expect \':\' after if condition.");
+        _ = try self.consume(.Colon, "Expect ':' after if condition.");
         
         const thenBranchStatements = try self.block();
         const thenBranch = try self.allocator.create(Stmt);
         thenBranch.* = Stmt{ .Block = .{ .statements = thenBranchStatements } };
 
         var elseBranch: ?*const Stmt = null;
-        std.debug.print("Checking Else. Current: {any}\n", .{self.current.type});
         if (try self.match(&.{.Else})) {
-            _ = try self.consume(.Colon, "Expect \':\' after else.");
+            _ = try self.consume(.Colon, "Expect ':' after else.");
             const elseBranchStatements = try self.block();
             const elsePtr = try self.allocator.create(Stmt);
             elsePtr.* = Stmt{ .Block = .{ .statements = elseBranchStatements } };
@@ -143,7 +155,7 @@ pub const Parser = struct {
 
     fn whileStatement(self: *Parser) ParserError!Stmt {
         const condition = try self.expression();
-        _ = try self.consume(.Colon, "Expect \':\' after while condition.");
+        _ = try self.consume(.Colon, "Expect ':' after while condition.");
         const bodyStatements = try self.block();
         const bodyPtr = try self.allocator.create(Stmt);
         bodyPtr.* = Stmt{ .Block = .{ .statements = bodyStatements } };
@@ -182,7 +194,7 @@ pub const Parser = struct {
     fn printStatement(self: *Parser) ParserError!Stmt {
         _ = try self.consume(.LeftParen, "Expect \'(\' after print.");
         const value = try self.expression();
-        _ = try self.consume(.RightParen, "Expect \')\' after value.");
+        _ = try self.consume(.RightParen, "Expect ')' after value.");
         if (self.check(.Newline)) _ = try self.advance();
         return Stmt{ .Print = .{ .expression = value } };
     }
@@ -196,6 +208,16 @@ pub const Parser = struct {
                  .Variable => |name| {
                      if (self.check(.Newline)) _ = try self.advance();
                      return Stmt{ .Var = .{ .name = name, .initializer = value } };
+                 },
+                 .Get => |get| {
+                     const valuePtr = try self.allocator.create(Expr);
+                     valuePtr.* = value;
+                     if (self.check(.Newline)) _ = try self.advance();
+                     return Stmt{ .Expression = .{ .expression = Expr{ .Set = .{ 
+                         .object = get.object, 
+                         .name = get.name, 
+                         .value = valuePtr 
+                     }}}}; 
                  },
                  else => {
                      return ParserError.UnexpectedToken;
@@ -213,14 +235,12 @@ pub const Parser = struct {
     
     fn logicOr(self: *Parser) ParserError!Expr {
         var expr = try self.logicAnd();
-        
         while (try self.match(&.{.Or})) {
             const right = try self.logicAnd();
             const left_ptr = try self.allocator.create(Expr);
             left_ptr.* = expr;
             const right_ptr = try self.allocator.create(Expr);
             right_ptr.* = right;
-            
             expr = Expr{ .Logical = .{ .left = left_ptr, .op = .Or, .right = right_ptr } };
         }
         return expr;
@@ -228,14 +248,12 @@ pub const Parser = struct {
 
     fn logicAnd(self: *Parser) ParserError!Expr {
         var expr = try self.equality();
-
         while (try self.match(&.{.And})) {
             const right = try self.equality();
             const left_ptr = try self.allocator.create(Expr);
             left_ptr.* = expr;
             const right_ptr = try self.allocator.create(Expr);
             right_ptr.* = right;
-
             expr = Expr{ .Logical = .{ .left = left_ptr, .op = .And, .right = right_ptr } };
         }
         return expr;
@@ -246,12 +264,10 @@ pub const Parser = struct {
         while (try self.match(&.{.EqualEqual, .BangEqual})) {
             const op_token = self.previous;
             const right = try self.comparison();
-            
             const right_ptr = try self.allocator.create(Expr);
             right_ptr.* = right;
             const left_ptr = try self.allocator.create(Expr);
             left_ptr.* = expr;
-
             expr = Expr{ .Binary = .{
                 .left = left_ptr,
                 .op = if (op_token.type == .EqualEqual) AST.BinaryOp.Equal else AST.BinaryOp.NotEqual,
@@ -266,12 +282,10 @@ pub const Parser = struct {
         while (try self.match(&.{.Greater, .GreaterEqual, .Less, .LessEqual})) {
             const op_token = self.previous;
             const right = try self.term();
-
-             const right_ptr = try self.allocator.create(Expr);
+            const right_ptr = try self.allocator.create(Expr);
             right_ptr.* = right;
             const left_ptr = try self.allocator.create(Expr);
             left_ptr.* = expr;
-
             const op = switch (op_token.type) {
                 .Greater => AST.BinaryOp.Greater,
                 .GreaterEqual => AST.BinaryOp.GreaterEqual,
@@ -279,7 +293,6 @@ pub const Parser = struct {
                 .LessEqual => AST.BinaryOp.LessEqual,
                 else => unreachable,
             };
-
             expr = Expr{ .Binary = .{
                 .left = left_ptr,
                 .op = op,
@@ -294,12 +307,10 @@ pub const Parser = struct {
         while (try self.match(&.{.Minus, .Plus})) {
             const op_token = self.previous;
             const right = try self.factor();
-            
             const right_ptr = try self.allocator.create(Expr);
             right_ptr.* = right;
             const left_ptr = try self.allocator.create(Expr);
             left_ptr.* = expr;
-
             expr = Expr{ .Binary = .{
                 .left = left_ptr,
                 .op = if (op_token.type == .Minus) AST.BinaryOp.Sub else AST.BinaryOp.Add,
@@ -314,12 +325,10 @@ pub const Parser = struct {
         while (try self.match(&.{.Slash, .Star})) {
             const op_token = self.previous;
             const right = try self.unary();
-
             const right_ptr = try self.allocator.create(Expr);
             right_ptr.* = right;
             const left_ptr = try self.allocator.create(Expr);
             left_ptr.* = expr;
-
             expr = Expr{ .Binary = .{
                 .left = left_ptr,
                 .op = if (op_token.type == .Slash) AST.BinaryOp.Div else AST.BinaryOp.Mul,
@@ -333,10 +342,8 @@ pub const Parser = struct {
         if (try self.match(&.{.Bang, .Minus})) {
              const op_token = self.previous;
              const right = try self.unary();
-             
              const right_ptr = try self.allocator.create(Expr);
              right_ptr.* = right;
-
              return Expr{ .Unary = .{
                  .op = if (op_token.type == .Bang) AST.UnaryOp.Not else AST.UnaryOp.Negate,
                  .right = right_ptr
@@ -351,6 +358,11 @@ pub const Parser = struct {
         while (true) {
             if (try self.match(&.{.LeftParen})) {
                 expr = try self.finishCall(expr);
+            } else if (try self.match(&.{.Dot})) {
+                const name = try self.consume(.Identifier, "Expect property name after '.'");
+                const exprPtr = try self.allocator.create(Expr);
+                exprPtr.* = expr;
+                expr = Expr{ .Get = .{ .object = exprPtr, .name = name.lexeme } };
             } else {
                 break;
             }
@@ -363,16 +375,13 @@ pub const Parser = struct {
         
         if (!self.check(.RightParen)) {
             while (true) {
-                if (args.items.len >= 255) {
-                    // Error: too many arguments
-                }
                 const arg = try self.expression();
                 try args.append(self.allocator, arg);
                 if (!try self.match(&.{.Comma})) break;
             }
         }
         
-        _ = try self.consume(.RightParen, "Expect \')\' after arguments.");
+        _ = try self.consume(.RightParen, "Expect ')' after arguments.");
         
         const calleePtr = try self.allocator.create(Expr);
         calleePtr.* = callee;
@@ -384,6 +393,7 @@ pub const Parser = struct {
         if (try self.match(&.{.False})) return Expr{ .Literal = .{ .Boolean = false } };
         if (try self.match(&.{.True})) return Expr{ .Literal = .{ .Boolean = true } };
         if (try self.match(&.{.Nil})) return Expr{ .Literal = .{ .Nil = {} } };
+        if (try self.match(&.{.This})) return Expr{ .This = .{ .keyword = self.previous.lexeme } };
 
         if (try self.match(&.{.Number})) {
              const num = std.fmt.parseFloat(f64, self.previous.lexeme) catch return ParserError.UnexpectedToken;
@@ -392,7 +402,6 @@ pub const Parser = struct {
 
         if (try self.match(&.{.String})) {
             const s = self.previous.lexeme;
-            // TODO handle string escapes?
             return Expr{ .Literal = .{ .String = s[1..s.len-1] } };
         }
 
@@ -402,7 +411,7 @@ pub const Parser = struct {
 
         if (try self.match(&.{.LeftParen})) {
             const expr = try self.expression();
-            _ = try self.consume(.RightParen, "Expect \')\' after expression.");
+            _ = try self.consume(.RightParen, "Expect ')' after expression.");
             const expr_ptr = try self.allocator.create(Expr);
             expr_ptr.* = expr;
             return Expr{ .Grouping = expr_ptr };
