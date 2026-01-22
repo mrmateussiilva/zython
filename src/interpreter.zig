@@ -268,6 +268,19 @@ pub const Interpreter = struct {
                         }
                         return InterpreterError.RuntimeError;
                     },
+                    .List => |list| {
+                        if (std.mem.eql(u8, g.name, "append")) {
+                            // Hack: Return a special function for append
+                            // We treat the 'closure' pointer as the List pointer
+                            return Value{ .Function = .{
+                                .name = "__list_append__",
+                                .params = @as([]const []const u8, &[_][]const u8{"item"}), // Dummy param
+                                .body = &[_]Stmt{}, // Empty body
+                                .closure = @as(*anyopaque, @ptrCast(list)),
+                            }};
+                        }
+                        return InterpreterError.RuntimeError;
+                    },
                     else => return InterpreterError.TypeError,
                 }
             },
@@ -287,6 +300,53 @@ pub const Interpreter = struct {
             },
             .Variable => |name| {
                 return self.environment.get(name);
+            },
+            .ListLiteral => |l| {
+                var elements = std.ArrayList(Value){};
+                for (l.elements) |elemExpr| {
+                    const val = try self.evaluate(elemExpr);
+                    try elements.append(self.allocator, val);
+                }
+                const list = try self.allocator.create(AST.LoxList);
+                list.* = AST.LoxList{ .elements = elements };
+                return Value{ .List = list };
+            },
+            .Subscript => |sub| {
+                const obj = try self.evaluate(sub.value.*);
+                const indexVal = try self.evaluate(sub.index.*);
+                
+                if (obj != .List) return InterpreterError.TypeError;
+                if (indexVal != .Number) return InterpreterError.TypeError;
+
+                const list = obj.List;
+                const idx_f = indexVal.Number;
+                if (idx_f < 0 or idx_f >= @as(f64, @floatFromInt(list.elements.items.len))) {
+                     std.debug.print("Index out of bounds.\n", .{});
+                     return InterpreterError.RuntimeError;
+                }
+                
+                const idx = @as(usize, @intFromFloat(idx_f));
+                return list.elements.items[idx];
+            },
+            .SetSubscript => |setSub| {
+                const obj = try self.evaluate(setSub.object.*);
+                const indexVal = try self.evaluate(setSub.index.*);
+                const val = try self.evaluate(setSub.value.*);
+
+                if (obj != .List) return InterpreterError.TypeError;
+                if (indexVal != .Number) return InterpreterError.TypeError;
+
+                const list = obj.List;
+                const idx_f = indexVal.Number;
+                
+                if (idx_f < 0 or idx_f >= @as(f64, @floatFromInt(list.elements.items.len))) {
+                     std.debug.print("Index out of bounds.\n", .{});
+                     return InterpreterError.RuntimeError;
+                }
+
+                const idx = @as(usize, @intFromFloat(idx_f));
+                list.elements.items[idx] = val;
+                return val;
             }
         }
     }
@@ -294,6 +354,14 @@ pub const Interpreter = struct {
     fn callValue(self: *Interpreter, callee: Value, args: []const Expr) InterpreterError!Value {
          switch (callee) {
             .Function => |func| {
+                if (std.mem.eql(u8, func.name, "__list_append__")) {
+                    if (args.len != 1) return InterpreterError.RuntimeError;
+                    const list = @as(*AST.LoxList, @ptrCast(@alignCast(func.closure)));
+                    const val = try self.evaluate(args[0]);
+                    try list.elements.append(self.allocator, val);
+                    return Value{ .Nil = {} };
+                }
+
                 var expected_params = func.params.len;
                 var param_offset: usize = 0;
 
@@ -380,6 +448,7 @@ pub const Interpreter = struct {
             .Function => return true,
             .Class => return true,
             .Instance => return true,
+            .List => |l| return l.elements.items.len > 0,
         }
     }
 
@@ -394,6 +463,7 @@ pub const Interpreter = struct {
              .Function => return false, 
              .Class => |c1| return c1 == b.Class,
              .Instance => |inst1| return inst1 == b.Instance,
+             .List => |l1| return l1 == b.List, // Identity check
         }
     }
 };

@@ -11,6 +11,10 @@ pub const LoxInstance = struct {
     fields: std.StringHashMap(Value),
 };
 
+pub const LoxList = struct {
+    elements: std.ArrayList(Value),
+};
+
 pub const Value = union(enum) {
     Nil: void,
     Boolean: bool,
@@ -18,12 +22,13 @@ pub const Value = union(enum) {
     String: []const u8,
     Function: struct {
         name: []const u8,
-        params: [][]const u8,
+        params: []const []const u8,
         body: []const Stmt,
         closure: ?*anyopaque,
     },
     Class: *LoxClass,
     Instance: *LoxInstance,
+    List: *LoxList,
     
     pub fn toString(self: Value, allocator: std.mem.Allocator) ![]u8 {
         switch (self) {
@@ -34,6 +39,20 @@ pub const Value = union(enum) {
             .Function => |f| return try std.fmt.allocPrint(allocator, "<function {s}>", .{f.name}),
             .Class => |c| return try std.fmt.allocPrint(allocator, "<class {s}>", .{c.name}),
             .Instance => |i| return try std.fmt.allocPrint(allocator, "<{s} instance>", .{i.klass.name}),
+            .List => |l| {
+                var list_str = std.ArrayList(u8){};
+                defer list_str.deinit(allocator);
+                try list_str.append(allocator, '[');
+                for (l.elements.items, 0..) |elem, i| {
+                    const s = try elem.toString(allocator);
+                    try list_str.appendSlice(allocator, s);
+                    if (i < l.elements.items.len - 1) {
+                        try list_str.appendSlice(allocator, ", ");
+                    }
+                }
+                try list_str.append(allocator, ']');
+                return list_str.toOwnedSlice(allocator);
+            },
         }
     }
 };
@@ -81,6 +100,18 @@ pub const Expr = union(enum) {
     This: struct {
         keyword: []const u8,
     },
+    ListLiteral: struct {
+        elements: []const Expr,
+    },
+    Subscript: struct {
+        value: *const Expr,
+        index: *const Expr,
+    },
+    SetSubscript: struct {
+        object: *const Expr,
+        index: *const Expr,
+        value: *const Expr,
+    },
     Literal: Value,
     Grouping: *const Expr,
     Variable: []const u8,
@@ -111,7 +142,7 @@ pub const Stmt = union(enum) {
     },
     Function: struct {
         name: []const u8,
-        params: [][]const u8,
+        params: []const []const u8,
         body: []const Stmt,
     },
     Class: struct {

@@ -219,6 +219,16 @@ pub const Parser = struct {
                          .value = valuePtr 
                      }}}}; 
                  },
+                 .Subscript => |subs| {
+                     const valuePtr = try self.allocator.create(Expr);
+                     valuePtr.* = value;
+                     if (self.check(.Newline)) _ = try self.advance();
+                     return Stmt{ .Expression = .{ .expression = Expr{ .SetSubscript = .{
+                         .object = subs.value,
+                         .index = subs.index,
+                         .value = valuePtr
+                     }}}};
+                 },
                  else => {
                      return ParserError.UnexpectedToken;
                  }
@@ -363,6 +373,14 @@ pub const Parser = struct {
                 const exprPtr = try self.allocator.create(Expr);
                 exprPtr.* = expr;
                 expr = Expr{ .Get = .{ .object = exprPtr, .name = name.lexeme } };
+            } else if (try self.match(&.{.LeftBracket})) {
+                const index = try self.expression();
+                _ = try self.consume(.RightBracket, "Expect ']' after subscript.");
+                const exprPtr = try self.allocator.create(Expr);
+                exprPtr.* = expr;
+                const indexPtr = try self.allocator.create(Expr);
+                indexPtr.* = index;
+                expr = Expr{ .Subscript = .{ .value = exprPtr, .index = indexPtr } };
             } else {
                 break;
             }
@@ -407,6 +425,19 @@ pub const Parser = struct {
 
         if (try self.match(&.{.Identifier})) {
             return Expr{ .Variable = self.previous.lexeme };
+        }
+
+        if (try self.match(&.{.LeftBracket})) {
+            var elements = std.ArrayList(Expr){};
+            if (!self.check(.RightBracket)) {
+                while (true) {
+                    const elem = try self.expression();
+                    try elements.append(self.allocator, elem);
+                    if (!try self.match(&.{.Comma})) break;
+                }
+            }
+            _ = try self.consume(.RightBracket, "Expect ']' after list elements.");
+            return Expr{ .ListLiteral = .{ .elements = elements.toOwnedSlice(self.allocator) catch return ParserError.OutOfMemory } };
         }
 
         if (try self.match(&.{.LeftParen})) {

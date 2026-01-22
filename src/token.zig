@@ -9,7 +9,7 @@ pub const TokenType = enum {
     Print, Return, Super, This, True, Var, While,
 
     // Operadores e Pontuação
-    LeftParen, RightParen, LeftBrace, RightBrace,
+    LeftParen, RightParen, LeftBrace, RightBrace, LeftBracket, RightBracket,
     Comma, Dot, Minus, Plus, Semicolon, Slash, Star,
     Bang, BangEqual,
     Equal, EqualEqual,
