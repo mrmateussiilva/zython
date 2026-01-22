@@ -9,15 +9,14 @@ pub const Lexer = struct {
     line: usize = 1,
     line_start: usize = 0,
     
-    // Gestão de indentação
     indent_stack: std.ArrayList(usize),
-    pending_dedents: usize = 0,
+    pending_dedents: usize = 0, // Unused now
     at_line_start: bool = true,
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator, source: []const u8) Lexer {
         var stack = std.ArrayList(usize){};
-        stack.append(allocator, 0) catch unreachable; // Base indentation level
+        stack.append(allocator, 0) catch unreachable; 
         return Lexer{
             .source = source,
             .indent_stack = stack,
@@ -96,49 +95,40 @@ pub const Lexer = struct {
         }
     }
     
-    // Função complexa para lidar com indentação Python style
     fn handleIndentation(self: *Lexer) !?Token {
-        // Conta espaços no início da linha
+        self.start = self.current;
+        
         var spaces: usize = 0;
-        while (self.peek() == ' ') {
+        var idx = self.current;
+        while (idx < self.source.len and self.source[idx] == ' ') : (idx += 1) {
             spaces += 1;
-            _ = self.advance();
         }
 
-        // Se for linha vazia ou comentário, ignora
-        if (self.peek() == '\n' or self.peek() == '#') return null;
+        if (idx >= self.source.len) return null;
+        if (self.source[idx] == '\n' or self.source[idx] == '#') return null;
 
         const current_indent = self.indent_stack.getLast();
 
         if (spaces > current_indent) {
             try self.indent_stack.append(self.allocator, spaces);
+            self.current += spaces;
             return self.makeToken(.Indent);
         } else if (spaces < current_indent) {
-            while (self.indent_stack.getLast() > spaces) {
-                _ = self.indent_stack.pop();
-                self.pending_dedents += 1;
+            _ = self.indent_stack.pop();
+            if (spaces > self.indent_stack.getLast()) {
+                 return self.errorToken("Inconsistent indentation");
             }
-            if (self.indent_stack.getLast() != spaces) {
-                return self.errorToken("Inconsistent indentation");
-            }
-            // Retorna o primeiro dedent, os outros virão nas próximas chamadas
-            self.pending_dedents -= 1;
             return self.makeToken(.Dedent);
         }
         
+        self.current += spaces;
         return null;
     }
 
     pub fn nextToken(self: *Lexer) !Token {
-        // Se temos DEDENTs pendentes, entrega eles antes de ler mais
-        if (self.pending_dedents > 0) {
-            self.pending_dedents -= 1;
-            return self.makeToken(.Dedent);
-        }
-
-        // Lógica de inicio de linha (para indentação)
         if (self.at_line_start) {
             if (try self.handleIndentation()) |token| {
+                if (token.type == .Indent) self.at_line_start = false;
                 return token;
             }
             self.at_line_start = false;
@@ -189,7 +179,6 @@ pub const Lexer = struct {
         }
         const text = self.source[self.start..self.current];
         
-        // Check keywords
         const type_ = if (std.mem.eql(u8, text, "and")) TokenType.And
         else if (std.mem.eql(u8, text, "class")) TokenType.Class
         else if (std.mem.eql(u8, text, "else")) TokenType.Else
@@ -203,7 +192,7 @@ pub const Lexer = struct {
         else if (std.mem.eql(u8, text, "return")) TokenType.Return
         else if (std.mem.eql(u8, text, "super")) TokenType.Super
         else if (std.mem.eql(u8, text, "True")) TokenType.True
-        else if (std.mem.eql(u8, text, "var")) TokenType.Var // Python uses implicit var decl, but useful to have
+        else if (std.mem.eql(u8, text, "var")) TokenType.Var 
         else if (std.mem.eql(u8, text, "while")) TokenType.While
         else TokenType.Identifier;
 
@@ -216,7 +205,7 @@ pub const Lexer = struct {
         }
 
         if (self.peek() == '.' and std.ascii.isDigit(self.peekNext())) {
-            _ = self.advance(); // consume .
+            _ = self.advance(); 
             while (std.ascii.isDigit(self.peek())) {
                 _ = self.advance();
             }
@@ -232,7 +221,7 @@ pub const Lexer = struct {
 
         if (self.isAtEnd()) return self.errorToken("Unterminated string.");
 
-        _ = self.advance(); // closing quote
+        _ = self.advance(); 
         return self.makeToken(.String);
     }
 };

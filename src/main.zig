@@ -102,7 +102,7 @@ fn run(allocator: std.mem.Allocator, source: []const u8) !void {
         return;
     };
 
-    var interpreter = Interpreter.init(allocator);
+    var interpreter = try Interpreter.init(allocator);
     defer interpreter.deinit();
 
     interpreter.interpret(statements.items) catch {
