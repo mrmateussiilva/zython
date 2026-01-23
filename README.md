@@ -33,6 +33,8 @@ O interpretador já suporta um subconjunto rico da linguagem:
     *   Strings (com concatenação `+`).
     *   Booleanos (`True`, `False`).
     *   `None`.
+*   **Modularidade**:
+    *   Sistema de Módulos: `import` de outros arquivos `.py`.
 
 ## 🚧 O Que Falta (Roadmap para Funcionalidade Completa)
 
@@ -43,8 +45,6 @@ Para o Zython ser útil em scripts reais, as seguintes funcionalidades são prio
 2.  **Refinamento OOP**:
     *   [ ] Herança simples: `class Filho(Pai):`.
     *   [ ] `super()`.
-4.  **Sistema de Módulos**:
-    *   [ ] `import` de outros arquivos `.py`.
 
 ## 🛠️ Instalação e Uso
 
@@ -63,7 +63,27 @@ Para o Zython ser útil em scripts reais, as seguintes funcionalidades são prio
     zig build run -- tests/class_test.py
     ```
 
-3.  **Modo Interativo (REPL)**:
+3.  **Testando Importação de Módulos**:
+    *   Crie um arquivo `mylib.py` no diretório raiz do projeto com o conteúdo:
+        ```python
+        # mylib.py
+        value = 123
+        def greet():
+            print("Hello from mylib!")
+        ```
+    *   Crie um arquivo `main.py` no diretório raiz do projeto com o conteúdo:
+        ```python
+        # main.py
+        import mylib
+        print(mylib.value)
+        mylib.greet()
+        ```
+    *   Execute o `main.py`:
+        ```bash
+        zig build run -- main.py
+        ```
+
+4.  **Modo Interativo (REPL)**:
     ```bash
     zig build run
     ```
