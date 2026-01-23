@@ -189,7 +189,7 @@ pub const Compiler = struct {
                 try self.emitOp(.GetLocal);
                 try self.emitU16(@as(u16, @intCast(list_slot)));
                 try self.emitOp(.ListLen);
-                try self.emitOp(.Less);
+                try self.emitOp(.LessNum);
 
                 const exit_jump = try self.emitJump(.JumpIfFalse);
                 try self.emitOp(.Pop);
@@ -215,7 +215,7 @@ pub const Compiler = struct {
                 try self.emitOp(.GetLocal);
                 try self.emitU16(@as(u16, @intCast(idx_slot)));
                 try self.emitConstant(Value{ .Number = 1 });
-                try self.emitOp(.Add);
+                try self.emitOp(.AddNum);
                 try self.emitOp(.SetLocal);
                 try self.emitU16(@as(u16, @intCast(idx_slot)));
                 try self.emitOp(.Pop);
@@ -267,17 +267,18 @@ pub const Compiler = struct {
             .Binary => |*b| {
                 try self.compileExpr(@constCast(b.left));
                 try self.compileExpr(@constCast(b.right));
+                const numeric = isNumberLiteralExpr(b.left.*) and isNumberLiteralExpr(b.right.*);
                 const op = switch (b.op) {
-                    .Add => OpCode.Add,
-                    .Sub => OpCode.Subtract,
-                    .Mul => OpCode.Multiply,
-                    .Div => OpCode.Divide,
+                    .Add => if (numeric) OpCode.AddNum else OpCode.Add,
+                    .Sub => if (numeric) OpCode.SubtractNum else OpCode.Subtract,
+                    .Mul => if (numeric) OpCode.MultiplyNum else OpCode.Multiply,
+                    .Div => if (numeric) OpCode.DivideNum else OpCode.Divide,
                     .Equal => OpCode.Equal,
                     .NotEqual => OpCode.NotEqual,
-                    .Greater => OpCode.Greater,
-                    .GreaterEqual => OpCode.GreaterEqual,
-                    .Less => OpCode.Less,
-                    .LessEqual => OpCode.LessEqual,
+                    .Greater => if (numeric) OpCode.GreaterNum else OpCode.Greater,
+                    .GreaterEqual => if (numeric) OpCode.GreaterEqualNum else OpCode.GreaterEqual,
+                    .Less => if (numeric) OpCode.LessNum else OpCode.Less,
+                    .LessEqual => if (numeric) OpCode.LessEqualNum else OpCode.LessEqual,
                 };
                 try self.emitOp(op);
             },
@@ -353,3 +354,10 @@ pub const Compiler = struct {
         }
     }
 };
+
+fn isNumberLiteralExpr(expr: Expr) bool {
+    return switch (expr) {
+        .Literal => |v| v == .Number,
+        else => false,
+    };
+}

@@ -115,9 +115,13 @@ pub const VM = struct {
                     try self.push(Value{ .Boolean = !isEqual(a, b) });
                 },
                 .Greater => try self.binaryNumberOp(.Greater),
+                .GreaterNum => try self.binaryNumberOp(.GreaterNum),
                 .GreaterEqual => try self.binaryNumberOp(.GreaterEqual),
+                .GreaterEqualNum => try self.binaryNumberOp(.GreaterEqualNum),
                 .Less => try self.binaryNumberOp(.Less),
+                .LessNum => try self.binaryNumberOp(.LessNum),
                 .LessEqual => try self.binaryNumberOp(.LessEqual),
+                .LessEqualNum => try self.binaryNumberOp(.LessEqualNum),
                 .Add => {
                     const b = self.pop();
                     const a = self.pop();
@@ -132,9 +136,13 @@ pub const VM = struct {
                         return VMError.TypeError;
                     }
                 },
+                .AddNum => try self.binaryNumberOp(.AddNum),
                 .Subtract => try self.binaryNumberOp(.Subtract),
+                .SubtractNum => try self.binaryNumberOp(.SubtractNum),
                 .Multiply => try self.binaryNumberOp(.Multiply),
+                .MultiplyNum => try self.binaryNumberOp(.MultiplyNum),
                 .Divide => try self.binaryNumberOp(.Divide),
+                .DivideNum => try self.binaryNumberOp(.DivideNum),
                 .Not => {
                     const v = self.pop();
                     try self.push(Value{ .Boolean = !isTruthy(v) });
@@ -313,12 +321,20 @@ pub const VM = struct {
         if (a != .Number or b != .Number) return VMError.TypeError;
         const res = switch (op) {
             .Greater => Value{ .Boolean = a.Number > b.Number },
+            .GreaterNum => Value{ .Boolean = a.Number > b.Number },
             .GreaterEqual => Value{ .Boolean = a.Number >= b.Number },
+            .GreaterEqualNum => Value{ .Boolean = a.Number >= b.Number },
             .Less => Value{ .Boolean = a.Number < b.Number },
+            .LessNum => Value{ .Boolean = a.Number < b.Number },
             .LessEqual => Value{ .Boolean = a.Number <= b.Number },
+            .LessEqualNum => Value{ .Boolean = a.Number <= b.Number },
+            .AddNum => Value{ .Number = a.Number + b.Number },
             .Subtract => Value{ .Number = a.Number - b.Number },
+            .SubtractNum => Value{ .Number = a.Number - b.Number },
             .Multiply => Value{ .Number = a.Number * b.Number },
+            .MultiplyNum => Value{ .Number = a.Number * b.Number },
             .Divide => Value{ .Number = a.Number / b.Number },
+            .DivideNum => Value{ .Number = a.Number / b.Number },
             else => return VMError.RuntimeError,
         };
         try self.push(res);
