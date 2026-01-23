@@ -2,6 +2,7 @@ const std = @import("std");
 const AST = @import("ast.zig");
 const Lexer = @import("lexer.zig").Lexer;
 const Parser = @import("parser.zig").Parser;
+const Resolver = @import("resolver.zig").Resolver;
 const Expr = AST.Expr;
 const Stmt = AST.Stmt;
 const Value = AST.Value;
@@ -13,6 +14,7 @@ const Environment = struct {
     values: std.StringHashMap(Value),
     enclosing: ?*Environment,
     allocator: std.mem.Allocator,
+    locals: ?[]Value,
 
     pub fn init(allocator: std.mem.Allocator, enclosing: ?*Environment) !*Environment {
         const env = try allocator.create(Environment);
@@ -20,12 +22,35 @@ const Environment = struct {
             .values = std.StringHashMap(Value).init(allocator),
             .enclosing = enclosing,
             .allocator = allocator,
+            .locals = null,
+        };
+        return env;
+    }
+
+    pub fn initWithLocals(allocator: std.mem.Allocator, enclosing: ?*Environment, locals_count: usize) !*Environment {
+        const env = try allocator.create(Environment);
+        var locals: ?[]Value = null;
+        if (locals_count > 0) {
+            const buf = try allocator.alloc(Value, locals_count);
+            for (buf) |*v| {
+                v.* = Value{ .Nil = {} };
+            }
+            locals = buf;
+        }
+        env.* = Environment{
+            .values = std.StringHashMap(Value).init(allocator),
+            .enclosing = enclosing,
+            .allocator = allocator,
+            .locals = locals,
         };
         return env;
     }
 
     pub fn deinit(self: *Environment) void {
         self.values.deinit();
+        if (self.locals) |buf| {
+            self.allocator.free(buf);
+        }
         self.allocator.destroy(self);
     }
 
@@ -53,6 +78,45 @@ const Environment = struct {
             return enc.get(name);
         }
         return InterpreterError.UndefinedVariable;
+    }
+
+    fn ancestor(self: *Environment, distance: usize) *Environment {
+        var env: *Environment = self;
+        var i: usize = 0;
+        while (i < distance) : (i += 1) {
+            env = env.enclosing.?;
+        }
+        return env;
+    }
+
+    pub fn setLocal(self: *Environment, slot: usize, value: Value) !void {
+        if (self.locals) |buf| {
+            if (slot >= buf.len) return InterpreterError.RuntimeError;
+            buf[slot] = value;
+            return;
+        }
+        return InterpreterError.RuntimeError;
+    }
+
+    pub fn getLocal(self: *Environment, slot: usize) !Value {
+        if (self.locals) |buf| {
+            if (slot >= buf.len) return InterpreterError.RuntimeError;
+            return buf[slot];
+        }
+        return InterpreterError.RuntimeError;
+    }
+
+    pub fn getAt(self: *Environment, distance: usize, name: []const u8) !Value {
+        const env = self.ancestor(distance);
+        if (env.values.get(name)) |val| {
+            return val;
+        }
+        return InterpreterError.UndefinedVariable;
+    }
+
+    pub fn getAtSlot(self: *Environment, distance: usize, slot: usize) !Value {
+        const env = self.ancestor(distance);
+        return env.getLocal(slot);
     }
 };
 
@@ -133,6 +197,10 @@ pub const Interpreter = struct {
         var statements = try parser.parse();
         defer statements.deinit(self.allocator);
 
+        var resolver = Resolver.init(self.allocator);
+        defer resolver.deinit();
+        try resolver.resolve(statements.items);
+
         const moduleEnv = try Environment.init(self.allocator, self.globals); 
         
         const previousEnv = self.environment;
@@ -167,7 +235,11 @@ pub const Interpreter = struct {
             },
             .Var => |s| {
                 const val = try self.evaluate(s.initializer);
-                try self.environment.define(s.name, val);
+                if (s.slot >= 0) {
+                    try self.environment.setLocal(@as(usize, @intCast(s.slot)), val);
+                } else {
+                    try self.environment.define(s.name, val);
+                }
                 return null;
             },
             .Block => |b| {
@@ -195,7 +267,11 @@ pub const Interpreter = struct {
 
                 const list = iterable.List;
                 for (list.elements.items) |item| {
-                    try self.environment.define(f.variable, item);
+                    if (f.slot >= 0) {
+                        try self.environment.setLocal(@as(usize, @intCast(f.slot)), item);
+                    } else {
+                        try self.environment.define(f.variable, item);
+                    }
                     if (try self.execute(f.body.*)) |ret| return ret;
                 }
                 return null;
@@ -206,8 +282,14 @@ pub const Interpreter = struct {
                     .params = s.params,
                     .body = s.body,
                     .closure = self.environment,
+                    .locals_count = s.locals_count,
+                    .this_slot = s.this_slot,
                 }};
-                try self.environment.define(s.name, func);
+                if (s.slot >= 0) {
+                    try self.environment.setLocal(@as(usize, @intCast(s.slot)), func);
+                } else {
+                    try self.environment.define(s.name, func);
+                }
                 return null;
             },
             .Class => |c| {
@@ -227,6 +309,8 @@ pub const Interpreter = struct {
                                  .params = f.params,
                                  .body = f.body,
                                  .closure = self.environment,
+                                 .locals_count = f.locals_count,
+                                 .this_slot = f.this_slot,
                              }};
                              try klass.methods.put(f.name, funcVal);
                          },
@@ -393,6 +477,8 @@ pub const Interpreter = struct {
                                 .params = &[_][]const u8{},
                                 .body = &[_]Stmt{},
                                 .closure = @as(*anyopaque, @ptrCast(ctx)),
+                                .locals_count = 0,
+                                .this_slot = -1,
                             }};
                         }
                         if (std.mem.eql(u8, g.name, "split")) {
@@ -403,6 +489,8 @@ pub const Interpreter = struct {
                                 .params = @as([]const []const u8, &[_][]const u8{"delimiter"}),
                                 .body = &[_]Stmt{},
                                 .closure = @as(*anyopaque, @ptrCast(ctx)),
+                                .locals_count = 0,
+                                .this_slot = -1,
                             }};
                         }
                         return InterpreterError.RuntimeError;
@@ -416,6 +504,8 @@ pub const Interpreter = struct {
                                 .params = @as([]const []const u8, &[_][]const u8{"item"}), // Dummy param
                                 .body = &[_]Stmt{}, // Empty body
                                 .closure = @as(*anyopaque, @ptrCast(list)),
+                                .locals_count = 0,
+                                .this_slot = -1,
                             }};
                         }
                         return InterpreterError.RuntimeError;
@@ -430,6 +520,8 @@ pub const Interpreter = struct {
                                 .params = &[_][]const u8{}, 
                                 .body = &[_]Stmt{},
                                 .closure = @as(*anyopaque, @ptrCast(ctx)),
+                                .locals_count = 0,
+                                .this_slot = -1,
                             }};
                         }
                         if (std.mem.eql(u8, g.name, "write")) {
@@ -438,6 +530,8 @@ pub const Interpreter = struct {
                                 .params = @as([]const []const u8, &[_][]const u8{"data"}),
                                 .body = &[_]Stmt{},
                                 .closure = @as(*anyopaque, @ptrCast(ctx)),
+                                .locals_count = 0,
+                                .this_slot = -1,
                             }};
                         }
                          if (std.mem.eql(u8, g.name, "close")) {
@@ -446,6 +540,8 @@ pub const Interpreter = struct {
                                 .params = &[_][]const u8{},
                                 .body = &[_]Stmt{},
                                 .closure = @as(*anyopaque, @ptrCast(ctx)),
+                                .locals_count = 0,
+                                .this_slot = -1,
                             }};
                         }
                         return InterpreterError.RuntimeError;
@@ -468,11 +564,23 @@ pub const Interpreter = struct {
                     else => return InterpreterError.TypeError,
                 }
             },
-            .This => |_| {
-                return self.environment.get("this");
+            .This => |t| {
+                if (t.depth >= 0) {
+                    return self.environment.getAtSlot(
+                        @as(usize, @intCast(t.depth)),
+                        @as(usize, @intCast(t.slot)),
+                    );
+                }
+                return self.globals.get(t.keyword);
             },
-            .Variable => |name| {
-                return self.environment.get(name);
+            .Variable => |var_expr| {
+                if (var_expr.depth >= 0) {
+                    return self.environment.getAtSlot(
+                        @as(usize, @intCast(var_expr.depth)),
+                        @as(usize, @intCast(var_expr.slot)),
+                    );
+                }
+                return self.globals.get(var_expr.name);
             },
             .ListLiteral => |l| {
                 var elements = std.ArrayList(Value){};
@@ -641,20 +749,35 @@ pub const Interpreter = struct {
                     return InterpreterError.RuntimeError;
                 }
 
-                const fnEnv = Environment.init(self.allocator, actual_parent_env) catch return InterpreterError.OutOfMemory; 
+                const fnEnv = Environment.initWithLocals(
+                    self.allocator,
+                    actual_parent_env,
+                    func.locals_count,
+                ) catch return InterpreterError.OutOfMemory;
 
                 // If it's a bound method, the first parameter is 'self', and it's the instance.
                 if (param_offset == 1) { // Means it's a bound method, and we skipped 'self' param in check
                     // The 'self' parameter needs to be defined as the instance itself.
-                    // Get the instance from actual_parent_env's "this"
-                    // It cannot be null if param_offset == 1, as that implies func.closure was not null.
-                    const instance_val = try actual_parent_env.get("this"); // Now safe to use
-                    try fnEnv.define(func.params[0], instance_val);
+                    const instance_val = try actual_parent_env.get("this");
+                    const base_offset: usize = if (func.this_slot >= 0)
+                        @as(usize, @intCast(func.this_slot + 1))
+                    else
+                        0;
+                    try fnEnv.setLocal(base_offset, instance_val);
+                }
+
+                if (func.this_slot >= 0) {
+                    const instance_val = try actual_parent_env.get("this");
+                    try fnEnv.setLocal(@as(usize, @intCast(func.this_slot)), instance_val);
                 }
 
                 for (args, 0..) |arg_expr, i| {
                     const argVal = try self.evaluate(arg_expr);
-                    try fnEnv.define(func.params[param_offset + i], argVal);
+                    const base_offset: usize = if (func.this_slot >= 0)
+                        @as(usize, @intCast(func.this_slot + 1))
+                    else
+                        0;
+                    try fnEnv.setLocal(base_offset + param_offset + i, argVal);
                 }
 
                 const ret = try self.executeBlock(func.body, fnEnv);
@@ -692,6 +815,8 @@ pub const Interpreter = struct {
             .params = method.Function.params,
             .body = method.Function.body,
             .closure = env,
+            .locals_count = method.Function.locals_count,
+            .this_slot = method.Function.this_slot,
         }};
     }
 

@@ -121,6 +121,9 @@ pub const Parser = struct {
             .name = name.lexeme,
             .params = params.toOwnedSlice(self.allocator) catch return ParserError.OutOfMemory,
             .body = body,
+            .locals_count = 0,
+            .this_slot = -1,
+            .slot = -1,
         }};
     }
 
@@ -191,6 +194,7 @@ pub const Parser = struct {
             .variable = variable.lexeme,
             .iterable = iterable,
             .body = bodyPtr,
+            .slot = -1,
         }};
     }
     
@@ -293,9 +297,9 @@ pub const Parser = struct {
 
     fn finishAssignment(self: *Parser, lvalue: Expr, rvalue: Expr) ParserError!Stmt {
              switch (lvalue) {
-                 .Variable => |name| {
+                 .Variable => |var_expr| {
                      if (self.check(.Newline)) _ = try self.advance();
-                     return Stmt{ .Var = .{ .name = name, .initializer = rvalue } };
+                     return Stmt{ .Var = .{ .name = var_expr.name, .initializer = rvalue, .slot = -1 } };
                  },
                  .Get => |get| {
                      const valuePtr = try self.allocator.create(Expr);
@@ -495,7 +499,9 @@ pub const Parser = struct {
         if (try self.match(&.{.False})) return Expr{ .Literal = .{ .Boolean = false } };
         if (try self.match(&.{.True})) return Expr{ .Literal = .{ .Boolean = true } };
         if (try self.match(&.{.Nil})) return Expr{ .Literal = .{ .Nil = {} } };
-        if (try self.match(&.{.This})) return Expr{ .This = .{ .keyword = self.previous.lexeme } };
+        if (try self.match(&.{.This})) {
+            return Expr{ .This = .{ .keyword = self.previous.lexeme, .depth = -1, .slot = -1 } };
+        }
 
         if (try self.match(&.{.Number})) {
              const num = std.fmt.parseFloat(f64, self.previous.lexeme) catch return ParserError.UnexpectedToken;
@@ -551,7 +557,7 @@ pub const Parser = struct {
         }
 
         if (try self.match(&.{.Identifier})) {
-            return Expr{ .Variable = self.previous.lexeme };
+            return Expr{ .Variable = .{ .name = self.previous.lexeme, .depth = -1, .slot = -1 } };
         }
 
         if (try self.match(&.{.LeftBracket})) {

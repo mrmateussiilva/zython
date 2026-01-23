@@ -67,6 +67,8 @@ pub const Value = union(enum) {
         params: []const []const u8,
         body: []const Stmt,
         closure: ?*anyopaque,
+        locals_count: usize,
+        this_slot: i32,
     },
     Class: *LoxClass,
     Instance: *LoxInstance,
@@ -189,6 +191,8 @@ pub const Expr = union(enum) {
     },
     This: struct {
         keyword: []const u8,
+        depth: i32, // -1 => global
+        slot: i32, // -1 => global
     },
     ListLiteral: struct {
         elements: []const Expr,
@@ -211,7 +215,11 @@ pub const Expr = union(enum) {
         parts: []const Expr,
     },
     Grouping: *const Expr,
-    Variable: []const u8,
+    Variable: struct {
+        name: []const u8,
+        depth: i32, // -1 => global
+        slot: i32, // -1 => global
+    },
 };
 
 pub const Stmt = union(enum) {
@@ -224,6 +232,7 @@ pub const Stmt = union(enum) {
     Var: struct {
         name: []const u8,
         initializer: Expr,
+        slot: i32, // -1 => global
     },
     Block: struct {
         statements: []const Stmt,
@@ -241,11 +250,15 @@ pub const Stmt = union(enum) {
         variable: []const u8,
         iterable: Expr,
         body: *const Stmt,
+        slot: i32, // -1 => global
     },
     Function: struct {
         name: []const u8,
         params: []const []const u8,
         body: []const Stmt,
+        locals_count: usize,
+        this_slot: i32, // -1 => no "this"
+        slot: i32, // -1 => global
     },
     Class: struct {
         name: []const u8,

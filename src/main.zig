@@ -2,6 +2,7 @@ const std = @import("std");
 const Lexer = @import("lexer.zig").Lexer;
 const Parser = @import("parser.zig").Parser;
 const Interpreter = @import("interpreter.zig").Interpreter;
+const Resolver = @import("resolver.zig").Resolver;
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -99,6 +100,13 @@ fn run(allocator: std.mem.Allocator, source: []const u8) !void {
     
     const statements = parser.parse() catch {
         std.debug.print("Parse Error.\n", .{});
+        return;
+    };
+
+    var resolver = Resolver.init(allocator);
+    defer resolver.deinit();
+    resolver.resolve(statements.items) catch {
+        std.debug.print("Resolver Error.\n", .{});
         return;
     };
 
