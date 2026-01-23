@@ -77,6 +77,10 @@ pub const Parser = struct {
     fn declaration(self: *Parser) ParserError!Stmt {
         if (try self.match(&.{.Class})) return try self.classDeclaration();
         if (try self.match(&.{.Fun})) return try self.function("function");
+        if (try self.match(&.{.Import})) {
+             const name = try self.consume(.Identifier, "Expect module name.");
+             return Stmt{ .Import = .{ .name = name.lexeme } };
+        }
         return try self.statement();
     }
 

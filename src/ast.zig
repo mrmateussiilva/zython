@@ -31,6 +31,7 @@ pub const ValueContext = struct {
             .NativeFunction => |f| hasher.update(std.mem.asBytes(&f)),
             .File => |f| hasher.update(std.mem.asBytes(&f.handle)),
             .Dict => |d| hasher.update(std.mem.asBytes(&d)),
+            .Module => |m| hasher.update(m.name),
         }
         return hasher.final();
     }
@@ -47,6 +48,7 @@ pub const ValueContext = struct {
             .Instance => return a.Instance == b.Instance,
             .Dict => return a.Dict == b.Dict,
             .File => return a.File.handle == b.File.handle,
+            .Module => return a.Module.exports == b.Module.exports, // Identity check on environment
             .Function => return false,
             .NativeFunction => return false,
         }
@@ -71,6 +73,10 @@ pub const Value = union(enum) {
     List: *LoxList,
     Dict: *LoxDict,
     File: std.fs.File,
+    Module: struct {
+        name: []const u8,
+        exports: *anyopaque, // *Environment
+    },
     NativeFunction: *const fn(allocator: std.mem.Allocator, args: []const Value) InterpreterError!Value,
     
     pub fn toString(self: Value, allocator: std.mem.Allocator) ![]u8 {
@@ -84,6 +90,7 @@ pub const Value = union(enum) {
             .Class => |c| return try std.fmt.allocPrint(allocator, "<class {s}>", .{c.name}),
             .Instance => |i| return try std.fmt.allocPrint(allocator, "<{s} instance>", .{i.klass.name}),
             .File => |_| return try allocator.dupe(u8, "<file>"),
+            .Module => |m| return try std.fmt.allocPrint(allocator, "<module {s}>", .{m.name}),
             .List => |l| {
                 var list_str = std.ArrayList(u8){};
                 defer list_str.deinit(allocator);
@@ -242,5 +249,8 @@ pub const Stmt = union(enum) {
     },
     Return: struct {
         value: ?Expr,
+    },
+    Import: struct {
+        name: []const u8,
     },
 };

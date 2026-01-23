@@ -1,5 +1,7 @@
 const std = @import("std");
 const AST = @import("ast.zig");
+const Lexer = @import("lexer.zig").Lexer;
+const Parser = @import("parser.zig").Parser;
 const Expr = AST.Expr;
 const Stmt = AST.Stmt;
 const Value = AST.Value;
@@ -109,6 +111,40 @@ pub const Interpreter = struct {
         self.globals.deinit();
     }
 
+    fn loadModule(self: *Interpreter, name: []const u8) !Value {
+        const fileName = try std.fmt.allocPrint(self.allocator, "{s}.py", .{name});
+        defer self.allocator.free(fileName);
+        
+        const file = std.fs.cwd().openFile(fileName, .{}) catch |err| {
+            std.debug.print("Could not open module '{s}': {any}\n", .{fileName, err});
+            return InterpreterError.RuntimeError;
+        };
+        defer file.close();
+        
+        const source = try file.readToEndAlloc(self.allocator, 1024 * 1024);
+        
+        var lexer = Lexer.init(self.allocator, source);
+        defer lexer.deinit(); 
+        
+        var parser = try Parser.init(self.allocator, &lexer);
+        
+        var statements = try parser.parse();
+        defer statements.deinit(self.allocator);
+
+        const moduleEnv = try Environment.init(self.allocator, self.globals); 
+        
+        const previousEnv = self.environment;
+        self.environment = moduleEnv;
+        
+        for (statements.items) |stmt| {
+            _ = try self.execute(stmt);
+        }
+        
+        self.environment = previousEnv;
+        
+        return Value{ .Module = .{ .name = try self.allocator.dupe(u8, name), .exports = moduleEnv } };
+    }
+
     pub fn interpret(self: *Interpreter, statements: []const Stmt) !void {
         for (statements) |stmt| {
             _ = try self.execute(stmt);
@@ -197,15 +233,21 @@ pub const Interpreter = struct {
                 }
                 return null;
             },
-            .Return => |s| {
-                if (s.value) |expr| {
-                    return try self.evaluate(expr);
-                }
-                return Value{ .Nil = {} };
-            }
+            .Return => |r| {
+                const val = if (r.value) |v| try self.evaluate(v) else Value{ .Nil = {} };
+                return val;
+            },
+            .Import => |imp| {
+                const module = self.loadModule(imp.name) catch |err| {
+                    std.debug.print("Error importing module '{s}': {any}\n", .{imp.name, err});
+                    return InterpreterError.RuntimeError;
+                };
+                try self.environment.define(imp.name, module);
+                return null;
+            },
         }
     }
-    
+
     fn executeBlock(self: *Interpreter, statements: []const Stmt, env: *Environment) InterpreterError!?Value {
         const previous = self.environment;
         self.environment = env;
@@ -375,6 +417,10 @@ pub const Interpreter = struct {
                             }};
                         }
                         return InterpreterError.RuntimeError;
+                    },
+                    .Module => |mod| {
+                        const env = @as(*Environment, @ptrCast(@alignCast(mod.exports)));
+                        return env.get(g.name);
                     },
                     else => return InterpreterError.TypeError,
                 }
@@ -622,6 +668,7 @@ pub const Interpreter = struct {
             .List => |l| return l.elements.items.len > 0,
             .File => return true,
             .Dict => |d| return d.count() > 0,
+            .Module => return true,
         }
     }
 
@@ -640,6 +687,7 @@ pub const Interpreter = struct {
              .List => |l1| return l1 == b.List, // Identity check
              .File => |f1| return f1.handle == b.File.handle,
              .Dict => |d1| return d1 == b.Dict,
+             .Module => |m1| return m1.exports == b.Module.exports,
         }
     }
 };
