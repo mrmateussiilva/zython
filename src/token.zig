@@ -6,8 +6,8 @@ pub const TokenType = enum {
     Number, // Int or Float for simplicity in lexer, refined in parser
 
     // Palavras-chave
-    And, Class, Else, False, For, Fun, If, Import, In, Nil, Or,
-    Print, Return, Super, This, True, Var, While,
+    And, Class, Else, Except, False, For, Fun, If, Import, In, Nil, Or,
+    Print, Raise, Return, Super, This, True, Try, Var, While,
 
     // Operadores e Pontuação
     LeftParen, RightParen, LeftBrace, RightBrace, LeftBracket, RightBracket,

@@ -189,6 +189,7 @@ pub const Lexer = struct {
         const type_ = if (std.mem.eql(u8, text, "and")) TokenType.And
         else if (std.mem.eql(u8, text, "class")) TokenType.Class
         else if (std.mem.eql(u8, text, "else")) TokenType.Else
+        else if (std.mem.eql(u8, text, "except")) TokenType.Except
         else if (std.mem.eql(u8, text, "false")) TokenType.False
         else if (std.mem.eql(u8, text, "for")) TokenType.For
         else if (std.mem.eql(u8, text, "def")) TokenType.Fun
@@ -198,9 +199,11 @@ pub const Lexer = struct {
         else if (std.mem.eql(u8, text, "None")) TokenType.Nil
         else if (std.mem.eql(u8, text, "or")) TokenType.Or
         else if (std.mem.eql(u8, text, "print")) TokenType.Print
+        else if (std.mem.eql(u8, text, "raise")) TokenType.Raise
         else if (std.mem.eql(u8, text, "return")) TokenType.Return
         else if (std.mem.eql(u8, text, "super")) TokenType.Super
         else if (std.mem.eql(u8, text, "True")) TokenType.True
+        else if (std.mem.eql(u8, text, "try")) TokenType.Try
         else if (std.mem.eql(u8, text, "var")) TokenType.Var 
         else if (std.mem.eql(u8, text, "while")) TokenType.While
         else TokenType.Identifier;

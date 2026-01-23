@@ -95,6 +95,7 @@ pub const Interpreter = struct {
     globals: *Environment,
     environment: *Environment,
     allocator: std.mem.Allocator,
+    current_exception: ?Value,
 
     pub fn init(allocator: std.mem.Allocator) !Interpreter {
         const globals = try Environment.init(allocator, null);
@@ -104,6 +105,7 @@ pub const Interpreter = struct {
             .globals = globals,
             .environment = globals,
             .allocator = allocator,
+            .current_exception = null,
         };
     }
 
@@ -232,6 +234,23 @@ pub const Interpreter = struct {
                      }
                 }
                 return null;
+            },
+            .Raise => |r| {
+                const val = try self.evaluate(r.value);
+                self.current_exception = val;
+                return InterpreterError.ZythonException;
+            },
+            .Try => |t| {
+                if (self.execute(t.try_branch.*)) |ret| {
+                    return ret;
+                } else |err| {
+                    if (err == InterpreterError.ZythonException) {
+                        self.current_exception = null;
+                        if (try self.execute(t.except_branch.*)) |ret| return ret;
+                        return null;
+                    }
+                    return err;
+                }
             },
             .Return => |r| {
                 const val = if (r.value) |v| try self.evaluate(v) else Value{ .Nil = {} };

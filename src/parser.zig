@@ -125,11 +125,17 @@ pub const Parser = struct {
     }
 
     fn statement(self: *Parser) ParserError!Stmt {
-        if (try self.match(&.{.If})) return try self.ifStatement();
-        if (try self.match(&.{.While})) return try self.whileStatement();
         if (try self.match(&.{.For})) return try self.forStatement();
-        if (try self.match(&.{.Return})) return try self.returnStatement();
+        if (try self.match(&.{.If})) return try self.ifStatement();
         if (try self.match(&.{.Print})) return try self.printStatement();
+        if (try self.match(&.{.Raise})) return try self.raiseStatement();
+        if (try self.match(&.{.Return})) return try self.returnStatement();
+        if (try self.match(&.{.Try})) return try self.tryStatement();
+        if (try self.match(&.{.While})) return try self.whileStatement();
+        if (try self.match(&.{.LeftBrace})) {
+            const stmts = try self.block();
+            return Stmt{ .Block = .{ .statements = stmts } };
+        }
         
         return try self.expressionStatement();
     }
@@ -211,6 +217,31 @@ pub const Parser = struct {
         
         _ = try self.consume(.Dedent, "Expect dedent after block.");
         return statements.toOwnedSlice(self.allocator) catch return ParserError.OutOfMemory;
+    }
+
+    fn raiseStatement(self: *Parser) ParserError!Stmt {
+        const value = try self.expression();
+        if (self.check(.Newline)) _ = try self.advance();
+        return Stmt{ .Raise = .{ .value = value } };
+    }
+
+    fn tryStatement(self: *Parser) ParserError!Stmt {
+        _ = try self.consume(.Colon, "Expect ':' after 'try'.");
+        const try_stmts = try self.block();
+        const try_block = Stmt{ .Block = .{ .statements = try_stmts } };
+        
+        _ = try self.consume(.Except, "Expect 'except' after try block.");
+        _ = try self.consume(.Colon, "Expect ':' after 'except'.");
+        const except_stmts = try self.block();
+        const except_block = Stmt{ .Block = .{ .statements = except_stmts } };
+
+        const try_ptr = try self.allocator.create(Stmt);
+        try_ptr.* = try_block;
+        
+        const except_ptr = try self.allocator.create(Stmt);
+        except_ptr.* = except_block;
+
+        return Stmt{ .Try = .{ .try_branch = try_ptr, .except_branch = except_ptr } };
     }
 
     fn printStatement(self: *Parser) ParserError!Stmt {

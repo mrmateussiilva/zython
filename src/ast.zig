@@ -143,6 +143,7 @@ pub const InterpreterError = error{
     TypeError,
     UndefinedVariable,
     Return, 
+    ZythonException,
     OutOfMemory,
 };
 
@@ -255,5 +256,12 @@ pub const Stmt = union(enum) {
     },
     Import: struct {
         name: []const u8,
+    },
+    Raise: struct {
+        value: Expr,
+    },
+    Try: struct {
+        try_branch: *const Stmt,
+        except_branch: *const Stmt,
     },
 };
