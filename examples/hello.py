@@ -1,8 +1,8 @@
-print("Hello from Zython!")
-x = 10
-y = 20
-print(x + y)
-print(x == 10)
-print(x > y)
-if True:
-    print("Hello")
+lista = []
+c = 0
+
+while c <= 100:
+    lista.append(c)
+    c = c + 1
+
+print("done")
