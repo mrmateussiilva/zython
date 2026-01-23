@@ -28,6 +28,7 @@ pub const ValueContext = struct {
             .Class => |c| hasher.update(std.mem.asBytes(&c)),
             .Instance => |i| hasher.update(std.mem.asBytes(&i)),
             .Function => |f| hasher.update(f.name),
+            .BytecodeFunction => |f| hasher.update(std.mem.asBytes(&f)),
             .NativeFunction => |f| hasher.update(std.mem.asBytes(&f)),
             .File => |f| hasher.update(std.mem.asBytes(&f.handle)),
             .Dict => |d| hasher.update(std.mem.asBytes(&d)),
@@ -50,6 +51,7 @@ pub const ValueContext = struct {
             .File => return a.File.handle == b.File.handle,
             .Module => return a.Module.exports == b.Module.exports, // Identity check on environment
             .Function => return false,
+            .BytecodeFunction => return a.BytecodeFunction == b.BytecodeFunction,
             .NativeFunction => return false,
         }
     }
@@ -70,6 +72,7 @@ pub const Value = union(enum) {
         locals_count: usize,
         this_slot: i32,
     },
+    BytecodeFunction: *anyopaque,
     Class: *LoxClass,
     Instance: *LoxInstance,
     List: *LoxList,
@@ -88,6 +91,7 @@ pub const Value = union(enum) {
             .Number => |n| return std.fmt.allocPrint(allocator, "{d}", .{n}),
             .String => |s| return try allocator.dupe(u8, s),
             .Function => |f| return try std.fmt.allocPrint(allocator, "<function {s}>", .{f.name}),
+            .BytecodeFunction => |_| return try allocator.dupe(u8, "<bc-fn>"),
             .NativeFunction => |_| return try allocator.dupe(u8, "<native fn>"),
             .Class => |c| return try std.fmt.allocPrint(allocator, "<class {s}>", .{c.name}),
             .Instance => |i| return try std.fmt.allocPrint(allocator, "<{s} instance>", .{i.klass.name}),

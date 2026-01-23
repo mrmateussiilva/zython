@@ -3,6 +3,8 @@ const Lexer = @import("lexer.zig").Lexer;
 const Parser = @import("parser.zig").Parser;
 const Interpreter = @import("interpreter.zig").Interpreter;
 const Resolver = @import("resolver.zig").Resolver;
+const Compiler = @import("compiler.zig").Compiler;
+const VM = @import("vm.zig").VM;
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -110,10 +112,20 @@ fn run(allocator: std.mem.Allocator, source: []const u8) !void {
         return;
     };
 
-    var interpreter = try Interpreter.init(allocator);
-    defer interpreter.deinit();
+    var compiler = Compiler.init(allocator, 0);
+    const bc_func = compiler.compileScript(statements.items) catch {
+        std.debug.print("Bytecode indisponivel, usando tree-walker.\n", .{});
+        var interpreter = try Interpreter.init(allocator);
+        defer interpreter.deinit();
+        interpreter.interpret(statements.items) catch {
+            std.debug.print("Runtime Error.\n", .{});
+        };
+        return;
+    };
 
-    interpreter.interpret(statements.items) catch {
+    var vm = try VM.init(allocator);
+    defer vm.deinit();
+    vm.interpret(bc_func) catch {
         std.debug.print("Runtime Error.\n", .{});
     };
 }
