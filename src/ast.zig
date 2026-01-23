@@ -15,6 +15,46 @@ pub const LoxList = struct {
     elements: std.ArrayList(Value),
 };
 
+pub const ValueContext = struct {
+    pub fn hash(self: @This(), s: Value) u64 {
+        _ = self;
+        var hasher = std.hash.Wyhash.init(0);
+        switch (s) {
+            .Nil => hasher.update("Nil"),
+            .Boolean => |b| hasher.update(if (b) "True" else "False"),
+            .Number => |n| hasher.update(std.mem.asBytes(&n)),
+            .String => |str| hasher.update(str),
+            .List => |l| hasher.update(std.mem.asBytes(&l)), 
+            .Class => |c| hasher.update(std.mem.asBytes(&c)),
+            .Instance => |i| hasher.update(std.mem.asBytes(&i)),
+            .Function => |f| hasher.update(f.name),
+            .NativeFunction => |f| hasher.update(std.mem.asBytes(&f)),
+            .File => |f| hasher.update(std.mem.asBytes(&f.handle)),
+            .Dict => |d| hasher.update(std.mem.asBytes(&d)),
+        }
+        return hasher.final();
+    }
+    pub fn eql(self: @This(), a: Value, b: Value) bool {
+        _ = self;
+        if (std.meta.activeTag(a) != std.meta.activeTag(b)) return false;
+        switch (a) {
+            .Nil => return true,
+            .Boolean => return a.Boolean == b.Boolean,
+            .Number => return a.Number == b.Number,
+            .String => return std.mem.eql(u8, a.String, b.String),
+            .List => return a.List == b.List,
+            .Class => return a.Class == b.Class,
+            .Instance => return a.Instance == b.Instance,
+            .Dict => return a.Dict == b.Dict,
+            .File => return a.File.handle == b.File.handle,
+            .Function => return false,
+            .NativeFunction => return false,
+        }
+    }
+};
+
+pub const LoxDict = std.HashMap(Value, Value, ValueContext, std.hash_map.default_max_load_percentage);
+
 pub const Value = union(enum) {
     Nil: void,
     Boolean: bool,
@@ -29,6 +69,7 @@ pub const Value = union(enum) {
     Class: *LoxClass,
     Instance: *LoxInstance,
     List: *LoxList,
+    Dict: *LoxDict,
     File: std.fs.File,
     NativeFunction: *const fn(allocator: std.mem.Allocator, args: []const Value) InterpreterError!Value,
     
@@ -56,6 +97,35 @@ pub const Value = union(enum) {
                 }
                 try list_str.append(allocator, ']');
                 return list_str.toOwnedSlice(allocator);
+            },
+            .Dict => |d| {
+                var str = std.ArrayList(u8){};
+                defer str.deinit(allocator);
+                try str.append(allocator, '{');
+                var iter = d.iterator();
+                var first = true;
+                while (iter.next()) |entry| {
+                    if (!first) try str.appendSlice(allocator, ", ");
+                    first = false;
+                    const keyStr = try entry.key_ptr.toString(allocator);
+                    const valStr = try entry.value_ptr.toString(allocator);
+                    
+                    // Add quotes if key is string? Python does 'key': val. 
+                    // But toString already returns raw string content for .String...
+                    // Let's rely on toString for now. Ideally toString for String should add quotes if it's debug print, but here it's raw.
+                    // For dict output, we usually want repr(), but let's stick to toString.
+                    if (entry.key_ptr.* == .String) try str.append(allocator, '\'');
+                    try str.appendSlice(allocator, keyStr);
+                    if (entry.key_ptr.* == .String) try str.append(allocator, '\'');
+                    
+                    try str.appendSlice(allocator, ": ");
+                    
+                    if (entry.value_ptr.* == .String) try str.append(allocator, '\'');
+                    try str.appendSlice(allocator, valStr);
+                    if (entry.value_ptr.* == .String) try str.append(allocator, '\'');
+                }
+                try str.append(allocator, '}');
+                return str.toOwnedSlice(allocator);
             },
         }
     }
@@ -114,6 +184,10 @@ pub const Expr = union(enum) {
     },
     ListLiteral: struct {
         elements: []const Expr,
+    },
+    DictLiteral: struct {
+        keys: []const Expr,
+        values: []const Expr,
     },
     Subscript: struct {
         value: *const Expr,

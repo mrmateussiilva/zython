@@ -466,6 +466,28 @@ pub const Parser = struct {
             return Expr{ .Grouping = expr_ptr };
         }
 
+        if (try self.match(&.{.LeftBrace})) {
+            var keys = std.ArrayList(Expr){};
+            var values = std.ArrayList(Expr){};
+            if (!self.check(.RightBrace)) {
+                while (true) {
+                    const key = try self.expression();
+                    _ = try self.consume(.Colon, "Expect ':' after key in dict.");
+                    const val = try self.expression();
+                    
+                    try keys.append(self.allocator, key);
+                    try values.append(self.allocator, val);
+                    
+                    if (!try self.match(&.{.Comma})) break;
+                }
+            }
+            _ = try self.consume(.RightBrace, "Expect '}' after dict pairs.");
+            return Expr{ .DictLiteral = .{ 
+                .keys = keys.toOwnedSlice(self.allocator) catch return ParserError.OutOfMemory,
+                .values = values.toOwnedSlice(self.allocator) catch return ParserError.OutOfMemory
+            }};
+        }
+
         std.debug.print("Expect expression. Found {any} at {d}:{d}\n", .{self.current.type, self.current.line, self.current.col});
         return ParserError.ExpectedExpression;
     }

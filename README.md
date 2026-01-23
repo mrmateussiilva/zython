@@ -24,22 +24,22 @@ O interpretador já suporta um subconjunto rico da linguagem:
     *   Laços `for`: `for item in lista:`.
 *   **Estruturas de Dados**:
     *   Listas/Arrays: `x = [1, 2, 3]`.
-    *   Indexação e modificação: `x[0] = 10`.
-    *   Métodos nativos: `.append()`.
+    *   Dicionários/Maps: `d = {'a': 1, 2: 'b'}`.
+    *   Indexação e modificação: `x[0] = 10`, `d['a'] = 20`.
+    *   Métodos nativos: `.append()`, `len()`.
+    *   Arquivos: `open()`, `read()`, `write()`, `close()`.
+    *   Strings: `.split()`, `.strip()`.
     *   Números (`float64`).
     *   Strings (com concatenação `+`).
     *   Booleanos (`True`, `False`).
     *   `None`.
-*   **IO**:
-    *   `print` (statement).
 
 ## 🚧 O Que Falta (Roadmap para Funcionalidade Completa)
 
 Para o Zython ser útil em scripts reais, as seguintes funcionalidades são prioritárias:
 
-1.  **Estruturas de Dados e Funções Auxiliares**:
-    *   [ ] Dicionários/Maps: `d = {'chave': 'valor'}`.
-    *   [ ] Funções auxiliares: `range()`, `len()`.
+1.  **Iteração e Auxiliares**:
+    *   [ ] Funções auxiliares: `range()`.
 2.  **Refinamento OOP**:
     *   [ ] Herança simples: `class Filho(Pai):`.
     *   [ ] `super()`.

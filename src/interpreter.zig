@@ -63,6 +63,7 @@ fn nativeLen(allocator: std.mem.Allocator, args: []const Value) InterpreterError
     switch (args[0]) {
         .String => |s| return Value{ .Number = @as(f64, @floatFromInt(s.len)) },
         .List => |l| return Value{ .Number = @as(f64, @floatFromInt(l.elements.items.len)) },
+        .Dict => |d| return Value{ .Number = @as(f64, @floatFromInt(d.count())) },
         else => {
             std.debug.print("Object of type 'number' has no len().\n", .{}); // Generic error message mimicking Python
             return InterpreterError.TypeError;
@@ -405,42 +406,65 @@ pub const Interpreter = struct {
                 list.* = AST.LoxList{ .elements = elements };
                 return Value{ .List = list };
             },
+            .DictLiteral => |d| {
+                const map = try self.allocator.create(AST.LoxDict);
+                map.* = AST.LoxDict.init(self.allocator);
+                for (d.keys, 0..) |kExpr, i| {
+                    const key = try self.evaluate(kExpr);
+                    const val = try self.evaluate(d.values[i]);
+                    try map.put(key, val);
+                }
+                return Value{ .Dict = map };
+            },
             .Subscript => |sub| {
                 const obj = try self.evaluate(sub.value.*);
                 const indexVal = try self.evaluate(sub.index.*);
                 
-                if (obj != .List) return InterpreterError.TypeError;
-                if (indexVal != .Number) return InterpreterError.TypeError;
-
-                const list = obj.List;
-                const idx_f = indexVal.Number;
-                if (idx_f < 0 or idx_f >= @as(f64, @floatFromInt(list.elements.items.len))) {
-                     std.debug.print("Index out of bounds.\n", .{});
-                     return InterpreterError.RuntimeError;
+                switch (obj) {
+                    .List => |list| {
+                        if (indexVal != .Number) return InterpreterError.TypeError;
+                        const idx_f = indexVal.Number;
+                        if (idx_f < 0 or idx_f >= @as(f64, @floatFromInt(list.elements.items.len))) {
+                             std.debug.print("Index out of bounds.\n", .{});
+                             return InterpreterError.RuntimeError;
+                        }
+                        const idx = @as(usize, @intFromFloat(idx_f));
+                        return list.elements.items[idx];
+                    },
+                    .Dict => |dict| {
+                        if (dict.get(indexVal)) |val| {
+                            return val;
+                        }
+                        // KeyError handling - simplified
+                        return InterpreterError.RuntimeError;
+                    },
+                    else => return InterpreterError.TypeError,
                 }
-                
-                const idx = @as(usize, @intFromFloat(idx_f));
-                return list.elements.items[idx];
             },
             .SetSubscript => |setSub| {
                 const obj = try self.evaluate(setSub.object.*);
                 const indexVal = try self.evaluate(setSub.index.*);
                 const val = try self.evaluate(setSub.value.*);
 
-                if (obj != .List) return InterpreterError.TypeError;
-                if (indexVal != .Number) return InterpreterError.TypeError;
+                switch (obj) {
+                    .List => |list| {
+                        if (indexVal != .Number) return InterpreterError.TypeError;
+                        const idx_f = indexVal.Number;
+                        if (idx_f < 0 or idx_f >= @as(f64, @floatFromInt(list.elements.items.len))) {
+                             std.debug.print("Index out of bounds.\n", .{});
+                             return InterpreterError.RuntimeError;
+                        }
 
-                const list = obj.List;
-                const idx_f = indexVal.Number;
-                
-                if (idx_f < 0 or idx_f >= @as(f64, @floatFromInt(list.elements.items.len))) {
-                     std.debug.print("Index out of bounds.\n", .{});
-                     return InterpreterError.RuntimeError;
+                        const idx = @as(usize, @intFromFloat(idx_f));
+                        list.elements.items[idx] = val;
+                        return val;
+                    },
+                    .Dict => |dict| {
+                        try dict.put(indexVal, val);
+                        return val;
+                    },
+                    else => return InterpreterError.TypeError,
                 }
-
-                const idx = @as(usize, @intFromFloat(idx_f));
-                list.elements.items[idx] = val;
-                return val;
             }
         }
     }
@@ -597,6 +621,7 @@ pub const Interpreter = struct {
             .Instance => return true,
             .List => |l| return l.elements.items.len > 0,
             .File => return true,
+            .Dict => |d| return d.count() > 0,
         }
     }
 
@@ -614,6 +639,7 @@ pub const Interpreter = struct {
              .Instance => |inst1| return inst1 == b.Instance,
              .List => |l1| return l1 == b.List, // Identity check
              .File => |f1| return f1.handle == b.File.handle,
+             .Dict => |d1| return d1 == b.Dict,
         }
     }
 };
