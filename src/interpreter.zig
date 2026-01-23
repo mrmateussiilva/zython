@@ -265,6 +265,17 @@ pub const Interpreter = struct {
 
     fn evaluate(self: *Interpreter, expr: Expr) InterpreterError!Value {
         switch (expr) {
+            .FString => |f| {
+                var buffer = std.ArrayList(u8){};
+                defer buffer.deinit(self.allocator);
+                
+                for (f.parts) |partExpr| {
+                    const val = try self.evaluate(partExpr);
+                    const str = try val.toString(self.allocator);
+                    try buffer.appendSlice(self.allocator, str);
+                }
+                return Value{ .String = buffer.toOwnedSlice(self.allocator) catch return InterpreterError.OutOfMemory };
+            },
             .Literal => |v| return v,
             .Grouping => |g| return self.evaluate(g.*),
             .Unary => |u| {

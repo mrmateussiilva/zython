@@ -2,6 +2,7 @@ pub const TokenType = enum {
     // Identificadores e Literais
     Identifier,
     String,
+    FString,
     Number, // Int or Float for simplicity in lexer, refined in parser
 
     // Palavras-chave

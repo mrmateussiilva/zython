@@ -206,6 +206,9 @@ pub const Expr = union(enum) {
         value: *const Expr,
     },
     Literal: Value,
+    FString: struct {
+        parts: []const Expr,
+    },
     Grouping: *const Expr,
     Variable: []const u8,
 };

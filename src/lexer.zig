@@ -141,6 +141,11 @@ pub const Lexer = struct {
 
         const c = self.advance();
 
+        if ((c == 'f' or c == 'F') and self.peek() == '"') {
+            _ = self.advance(); // consume "
+            return self.fString();
+        }
+
         if (std.ascii.isAlphabetic(c) or c == '_') return self.identifier();
         if (std.ascii.isDigit(c)) return self.number();
 
@@ -215,6 +220,18 @@ pub const Lexer = struct {
             }
         }
         return self.makeToken(.Number);
+    }
+
+    fn fString(self: *Lexer) Token {
+        while (self.peek() != '"' and !self.isAtEnd()) {
+            if (self.peek() == '\n') self.line += 1;
+            _ = self.advance();
+        }
+
+        if (self.isAtEnd()) return self.errorToken("Unterminated f-string.");
+
+        _ = self.advance(); 
+        return self.makeToken(.FString);
     }
 
     fn string(self: *Lexer) Token {

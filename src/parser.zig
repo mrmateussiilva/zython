@@ -476,6 +476,49 @@ pub const Parser = struct {
             return Expr{ .Literal = .{ .String = s[1..s.len-1] } };
         }
 
+        if (try self.match(&.{.FString})) {
+            const raw = self.previous.lexeme;
+            // Remove f" (2 chars) and " (1 char)
+            if (raw.len < 3) return Expr{ .Literal = .{ .String = "" } }; // Safety
+            const content = raw[2..raw.len-1];
+            
+            var parts = std.ArrayList(Expr){};
+            
+            var i: usize = 0;
+            while (i < content.len) {
+                if (content[i] == '{') {
+                    // Find closing '}'
+                    var j = i + 1;
+                    while (j < content.len) : (j += 1) {
+                        if (content[j] == '}') break;
+                    }
+                    
+                    if (j >= content.len) return ParserError.UnexpectedToken; 
+                    
+                    const snippet = content[i+1..j];
+                    
+                    // Parse snippet
+                    var subLexer = Lexer.init(self.allocator, snippet);
+                    var subParser = try Parser.init(self.allocator, &subLexer);
+                    const expr = try subParser.expression();
+                    
+                    try parts.append(self.allocator, expr);
+                    
+                    i = j + 1;
+                } else {
+                    // Literal text
+                    var j = i;
+                    while (j < content.len and content[j] != '{') : (j += 1) {}
+                    const text = content[i..j];
+                    if (text.len > 0) {
+                         try parts.append(self.allocator, Expr{ .Literal = .{ .String = text } });
+                    }
+                    i = j;
+                }
+            }
+            return Expr{ .FString = .{ .parts = parts.toOwnedSlice(self.allocator) catch return ParserError.OutOfMemory } };
+        }
+
         if (try self.match(&.{.Identifier})) {
             return Expr{ .Variable = self.previous.lexeme };
         }
