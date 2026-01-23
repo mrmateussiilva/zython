@@ -318,8 +318,8 @@ pub const Interpreter = struct {
                         if (left == .Number and right == .Number) return Value{ .Number = left.Number + right.Number };
                         if (left == .String and right == .String) {
                             const res = try self.allocator.alloc(u8, left.String.len + right.String.len);
-                            std.mem.copy(u8, res[0..left.String.len], left.String);
-                            std.mem.copy(u8, res[left.String.len..], right.String);
+                            std.mem.copyForwards(u8, res[0..left.String.len], left.String);
+                            std.mem.copyForwards(u8, res[left.String.len..], right.String);
                             return Value{ .String = res };
                         }
                         return InterpreterError.TypeError;
@@ -558,9 +558,9 @@ pub const Interpreter = struct {
                     return native(self.allocator, stack_buf[0..args.len]);
                 }
 
-                var evaluatedArgs = std.ArrayList(Value).init(self.allocator);
-                defer evaluatedArgs.deinit();
-                try evaluatedArgs.ensureTotalCapacity(args.len);
+                var evaluatedArgs = std.ArrayList(Value){};
+                defer evaluatedArgs.deinit(self.allocator);
+                try evaluatedArgs.ensureTotalCapacity(self.allocator, args.len);
                 for (args) |argExpr| {
                     const val = try self.evaluate(argExpr);
                     evaluatedArgs.appendAssumeCapacity(val);
