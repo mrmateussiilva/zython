@@ -273,6 +273,7 @@ pub const Stmt = union(enum) {
     },
     Import: struct {
         name: []const u8,
+        slot: i32, // -1 => global
     },
     Raise: struct {
         value: Expr,

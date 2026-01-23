@@ -37,6 +37,7 @@ pub const OpCode = enum(u8) {
     Loop,
     Call,
     GetAttr,
+    Import,
     Return,
     BuildList,
     BuildDict,
@@ -87,4 +88,5 @@ pub const BytecodeFunction = struct {
     arity: u8,
     locals_count: usize,
     this_slot: i32,
+    globals: ?*std.StringHashMap(AST.Value),
 };

@@ -37,6 +37,7 @@ pub const Compiler = struct {
             .arity = 0,
             .locals_count = 0,
             .this_slot = -1,
+            .globals = null,
         };
         self.chunk = &func.chunk;
 
@@ -60,6 +61,7 @@ pub const Compiler = struct {
             .arity = @as(u8, @intCast(f.params.len)),
             .locals_count = 0,
             .this_slot = f.this_slot,
+            .globals = null,
         };
 
         var child = Compiler.init(self.allocator, f.locals_count);
@@ -237,6 +239,19 @@ pub const Compiler = struct {
                     try self.emitU16(name_idx);
                 }
             },
+            .Import => |*imp| {
+                const name_idx = try self.chunk.addConstant(self.allocator, Value{ .String = imp.name });
+                try self.emitOp(.Import);
+                try self.emitU16(name_idx);
+                if (imp.slot >= 0) {
+                    try self.emitOp(.SetLocal);
+                    try self.emitU16(@as(u16, @intCast(imp.slot)));
+                    try self.emitOp(.Pop);
+                } else {
+                    try self.emitOp(.DefineGlobal);
+                    try self.emitU16(name_idx);
+                }
+            },
             .Return => |*r| {
                 if (r.value) |*val| {
                     try self.compileExpr(val);
@@ -245,7 +260,7 @@ pub const Compiler = struct {
                 }
                 try self.emitOp(.Return);
             },
-            .Class, .Import, .Raise, .Try => return CompileError.UnsupportedFeature,
+            .Class, .Raise, .Try => return CompileError.UnsupportedFeature,
         }
     }
 

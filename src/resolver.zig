@@ -159,7 +159,9 @@ pub const Resolver = struct {
                     try self.resolveExpr(val);
                 }
             },
-            .Import => |_| {},
+            .Import => |*imp| {
+                imp.slot = try self.define(imp.name);
+            },
             .Raise => |*r| {
                 try self.resolveExpr(&r.value);
             },

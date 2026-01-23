@@ -1,6 +1,10 @@
 const std = @import("std");
 const AST = @import("ast.zig");
 const Bytecode = @import("bytecode.zig");
+const Lexer = @import("lexer.zig").Lexer;
+const Parser = @import("parser.zig").Parser;
+const Resolver = @import("resolver.zig").Resolver;
+const Compiler = @import("compiler.zig").Compiler;
 
 const Value = AST.Value;
 const OpCode = Bytecode.OpCode;
@@ -15,37 +19,55 @@ pub const VMError = error{
 
 const CallFrame = struct {
     func: *BytecodeFunction,
+    globals: *std.StringHashMap(Value),
     ip: usize,
     base: usize,
 };
 
 pub const VM = struct {
     allocator: std.mem.Allocator,
-    globals: std.StringHashMap(Value),
+    globals: *std.StringHashMap(Value),
+    owns_globals: bool,
     stack: std.ArrayList(Value),
     frames: std.ArrayList(CallFrame),
 
     pub fn init(allocator: std.mem.Allocator) !VM {
-        var globals = std.StringHashMap(Value).init(allocator);
+        const globals = try allocator.create(std.StringHashMap(Value));
+        globals.* = std.StringHashMap(Value).init(allocator);
         try globals.put("len", Value{ .NativeFunction = nativeLen });
         try globals.put("open", Value{ .NativeFunction = nativeOpen });
         return .{
             .allocator = allocator,
             .globals = globals,
+            .owns_globals = true,
+            .stack = std.ArrayList(Value){},
+            .frames = std.ArrayList(CallFrame){},
+        };
+    }
+
+    pub fn initWithGlobals(allocator: std.mem.Allocator, globals: *std.StringHashMap(Value)) VM {
+        return .{
+            .allocator = allocator,
+            .globals = globals,
+            .owns_globals = false,
             .stack = std.ArrayList(Value){},
             .frames = std.ArrayList(CallFrame){},
         };
     }
 
     pub fn deinit(self: *VM) void {
-        self.globals.deinit();
+        if (self.owns_globals) {
+            self.globals.deinit();
+            self.allocator.destroy(self.globals);
+        }
         self.stack.deinit(self.allocator);
         self.frames.deinit(self.allocator);
     }
 
     pub fn interpret(self: *VM, func: *BytecodeFunction) VMError!void {
         self.stack.items.len = 0;
-        try self.frames.append(self.allocator, .{ .func = func, .ip = 0, .base = 0 });
+        if (func.globals == null) func.globals = self.globals;
+        try self.frames.append(self.allocator, .{ .func = func, .globals = self.globals, .ip = 0, .base = 0 });
 
         if (func.locals_count > 0) {
             try self.stack.ensureTotalCapacity(self.allocator, func.locals_count);
@@ -91,7 +113,7 @@ pub const VM = struct {
                     const idx = self.readU16(frame, code);
                     const name = frame.func.chunk.constants.items[idx];
                     if (name != .String) return VMError.RuntimeError;
-                    if (self.globals.get(name.String)) |val| {
+                    if (frame.globals.get(name.String)) |val| {
                         try self.push(val);
                     } else {
                         return VMError.UndefinedVariable;
@@ -102,7 +124,11 @@ pub const VM = struct {
                     const name = frame.func.chunk.constants.items[idx];
                     if (name != .String) return VMError.RuntimeError;
                     const val = self.pop();
-                    try self.globals.put(name.String, val);
+                    try frame.globals.put(name.String, val);
+                    if (val == .BytecodeFunction) {
+                        const func = @as(*BytecodeFunction, @ptrCast(@alignCast(val.BytecodeFunction)));
+                        func.globals = frame.globals;
+                    }
                 },
                 .Equal => {
                     const b = self.pop();
@@ -182,6 +208,14 @@ pub const VM = struct {
                     if (name != .String) return VMError.RuntimeError;
                     const obj = self.pop();
                     switch (obj) {
+                        .Module => |m| {
+                            const module_globals = @as(*std.StringHashMap(Value), @ptrCast(@alignCast(m.exports)));
+                            if (module_globals.get(name.String)) |val| {
+                                try self.push(val);
+                            } else {
+                                return VMError.UndefinedVariable;
+                            }
+                        },
                         .List => |list| {
                             if (!std.mem.eql(u8, name.String, "append")) return VMError.RuntimeError;
                             const fn_val = Value{ .Function = .{
@@ -268,6 +302,13 @@ pub const VM = struct {
                         },
                         else => return VMError.RuntimeError,
                     }
+                },
+                .Import => {
+                    const idx = self.readU16(frame, code);
+                    const name = frame.func.chunk.constants.items[idx];
+                    if (name != .String) return VMError.RuntimeError;
+                    const module = try self.loadModule(name.String);
+                    try self.push(module);
                 },
                 .Return => {
                     const result = self.pop();
@@ -394,18 +435,21 @@ pub const VM = struct {
     fn callValue(self: *VM, arg_count: u8) VMError!void {
         const callee_index = self.stack.items.len - 1 - arg_count;
         const callee = self.stack.items[callee_index];
+        const current_frame = &self.frames.items[self.frames.items.len - 1];
         switch (callee) {
             .BytecodeFunction => |ptr| {
                 const func = @as(*BytecodeFunction, @ptrCast(@alignCast(ptr)));
                 if (func.arity != arg_count) return VMError.RuntimeError;
                 const base = callee_index + 1;
                 if (func.locals_count < arg_count) return VMError.RuntimeError;
-                const frame = CallFrame{
+                const globals = func.globals orelse current_frame.globals;
+                const call_frame = CallFrame{
                     .func = func,
+                    .globals = globals,
                     .ip = 0,
                     .base = base,
                 };
-                try self.frames.append(self.allocator, frame);
+                try self.frames.append(self.allocator, call_frame);
 
                 const needed = base + func.locals_count;
                 if (self.stack.items.len < needed) {
@@ -514,7 +558,53 @@ pub const VM = struct {
         };
         try self.push(res);
     }
+
+    fn loadModule(self: *VM, name: []const u8) VMError!Value {
+        const source = try loadSource(self.allocator, name);
+        defer self.allocator.free(source);
+
+        var lexer = Lexer.init(self.allocator, source);
+        defer lexer.deinit();
+
+        var parser = Parser.init(self.allocator, &lexer) catch return VMError.RuntimeError;
+        var statements = parser.parse() catch return VMError.RuntimeError;
+        defer statements.deinit(self.allocator);
+
+        var resolver = Resolver.init(self.allocator);
+        defer resolver.deinit();
+        resolver.resolve(statements.items) catch return VMError.RuntimeError;
+
+        var compiler = Compiler.init(self.allocator, 0);
+        const bc_func = compiler.compileScript(statements.items) catch return VMError.RuntimeError;
+
+        const module_globals = try self.allocator.create(std.StringHashMap(Value));
+        module_globals.* = std.StringHashMap(Value).init(self.allocator);
+        try copyBuiltins(module_globals, self.globals);
+
+        var module_vm = VM.initWithGlobals(self.allocator, module_globals);
+        defer module_vm.deinit();
+        module_vm.interpret(bc_func) catch return VMError.RuntimeError;
+
+        return Value{ .Module = .{ .name = try self.allocator.dupe(u8, name), .exports = module_globals } };
+    }
 };
+
+fn loadSource(allocator: std.mem.Allocator, name: []const u8) VMError![]u8 {
+    const file_name = std.fmt.allocPrint(allocator, "{s}.py", .{name}) catch return VMError.OutOfMemory;
+    defer allocator.free(file_name);
+
+    const file = std.fs.cwd().openFile(file_name, .{}) catch return VMError.RuntimeError;
+    defer file.close();
+    const source = file.readToEndAlloc(allocator, 1024 * 1024) catch return VMError.RuntimeError;
+    return source;
+}
+
+fn copyBuiltins(dst: *std.StringHashMap(Value), src: *std.StringHashMap(Value)) VMError!void {
+    var it = src.iterator();
+    while (it.next()) |entry| {
+        try dst.put(entry.key_ptr.*, entry.value_ptr.*);
+    }
+}
 
 fn isTruthy(value: Value) bool {
     return switch (value) {

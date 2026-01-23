@@ -79,7 +79,7 @@ pub const Parser = struct {
         if (try self.match(&.{.Fun})) return try self.function("function");
         if (try self.match(&.{.Import})) {
              const name = try self.consume(.Identifier, "Expect module name.");
-             return Stmt{ .Import = .{ .name = name.lexeme } };
+             return Stmt{ .Import = .{ .name = name.lexeme, .slot = -1 } };
         }
         return try self.statement();
     }
