@@ -176,6 +176,99 @@ pub const VM = struct {
                     const arg_count = self.readU8(frame, code);
                     try self.callValue(arg_count);
                 },
+                .GetAttr => {
+                    const idx = self.readU16(frame, code);
+                    const name = frame.func.chunk.constants.items[idx];
+                    if (name != .String) return VMError.RuntimeError;
+                    const obj = self.pop();
+                    switch (obj) {
+                        .List => |list| {
+                            if (!std.mem.eql(u8, name.String, "append")) return VMError.RuntimeError;
+                            const fn_val = Value{ .Function = .{
+                                .name = "__list_append__",
+                                .params = @as([]const []const u8, &[_][]const u8{"item"}),
+                                .body = &[_]AST.Stmt{},
+                                .closure = @as(*anyopaque, @ptrCast(list)),
+                                .locals_count = 0,
+                                .this_slot = -1,
+                            }};
+                            try self.push(fn_val);
+                        },
+                        .String => |s| {
+                            if (std.mem.eql(u8, name.String, "strip")) {
+                                const ctx = try self.allocator.create([]const u8);
+                                ctx.* = s;
+                                const fn_val = Value{ .Function = .{
+                                    .name = "__str_strip__",
+                                    .params = &[_][]const u8{},
+                                    .body = &[_]AST.Stmt{},
+                                    .closure = @as(*anyopaque, @ptrCast(ctx)),
+                                    .locals_count = 0,
+                                    .this_slot = -1,
+                                }};
+                                try self.push(fn_val);
+                                break;
+                            }
+                            if (std.mem.eql(u8, name.String, "split")) {
+                                const ctx = try self.allocator.create([]const u8);
+                                ctx.* = s;
+                                const fn_val = Value{ .Function = .{
+                                    .name = "__str_split__",
+                                    .params = @as([]const []const u8, &[_][]const u8{"delimiter"}),
+                                    .body = &[_]AST.Stmt{},
+                                    .closure = @as(*anyopaque, @ptrCast(ctx)),
+                                    .locals_count = 0,
+                                    .this_slot = -1,
+                                }};
+                                try self.push(fn_val);
+                                break;
+                            }
+                            return VMError.RuntimeError;
+                        },
+                        .File => |f| {
+                            const ctx = try self.allocator.create(std.fs.File);
+                            ctx.* = f;
+                            if (std.mem.eql(u8, name.String, "read")) {
+                                const fn_val = Value{ .Function = .{
+                                    .name = "__file_read__",
+                                    .params = &[_][]const u8{},
+                                    .body = &[_]AST.Stmt{},
+                                    .closure = @as(*anyopaque, @ptrCast(ctx)),
+                                    .locals_count = 0,
+                                    .this_slot = -1,
+                                }};
+                                try self.push(fn_val);
+                                break;
+                            }
+                            if (std.mem.eql(u8, name.String, "write")) {
+                                const fn_val = Value{ .Function = .{
+                                    .name = "__file_write__",
+                                    .params = @as([]const []const u8, &[_][]const u8{"data"}),
+                                    .body = &[_]AST.Stmt{},
+                                    .closure = @as(*anyopaque, @ptrCast(ctx)),
+                                    .locals_count = 0,
+                                    .this_slot = -1,
+                                }};
+                                try self.push(fn_val);
+                                break;
+                            }
+                            if (std.mem.eql(u8, name.String, "close")) {
+                                const fn_val = Value{ .Function = .{
+                                    .name = "__file_close__",
+                                    .params = &[_][]const u8{},
+                                    .body = &[_]AST.Stmt{},
+                                    .closure = @as(*anyopaque, @ptrCast(ctx)),
+                                    .locals_count = 0,
+                                    .this_slot = -1,
+                                }};
+                                try self.push(fn_val);
+                                break;
+                            }
+                            return VMError.RuntimeError;
+                        },
+                        else => return VMError.RuntimeError,
+                    }
+                },
                 .Return => {
                     const result = self.pop();
                     const finished = self.frames.pop() orelse return VMError.RuntimeError;
@@ -252,6 +345,7 @@ pub const VM = struct {
                 },
             }
         }
+        return Value{ .Nil = {} };
     }
 
     fn readU8(self: *VM, frame: *CallFrame, code: []const u8) u8 {
@@ -310,6 +404,71 @@ pub const VM = struct {
                 const result = native(self.allocator, args_slice) catch return VMError.RuntimeError;
                 self.stack.items.len = callee_index;
                 try self.push(result);
+            },
+            .Function => |func| {
+                if (std.mem.eql(u8, func.name, "__list_append__")) {
+                    if (arg_count != 1) return VMError.RuntimeError;
+                    const list = @as(*AST.LoxList, @ptrCast(@alignCast(func.closure.?)));
+                    const value = self.stack.items[callee_index + 1];
+                    try list.elements.append(self.allocator, value);
+                    self.stack.items.len = callee_index;
+                    try self.push(Value{ .Nil = {} });
+                    return;
+                }
+                if (std.mem.eql(u8, func.name, "__str_strip__")) {
+                    if (arg_count != 0) return VMError.RuntimeError;
+                    const str_ptr = @as(*[]const u8, @ptrCast(@alignCast(func.closure.?)));
+                    const trimmed = std.mem.trim(u8, str_ptr.*, " \t\r\n");
+                    const duped = try self.allocator.dupe(u8, trimmed);
+                    self.stack.items.len = callee_index;
+                    try self.push(Value{ .String = duped });
+                    return;
+                }
+                if (std.mem.eql(u8, func.name, "__str_split__")) {
+                    if (arg_count != 1) return VMError.RuntimeError;
+                    const str_ptr = @as(*[]const u8, @ptrCast(@alignCast(func.closure.?)));
+                    const delim = self.stack.items[callee_index + 1];
+                    if (delim != .String) return VMError.TypeError;
+
+                    var parts = std.ArrayList(Value){};
+                    var iter = std.mem.splitSequence(u8, str_ptr.*, delim.String);
+                    while (iter.next()) |part| {
+                        try parts.append(self.allocator, Value{ .String = try self.allocator.dupe(u8, part) });
+                    }
+
+                    const list = try self.allocator.create(AST.LoxList);
+                    list.* = AST.LoxList{ .elements = parts };
+                    self.stack.items.len = callee_index;
+                    try self.push(Value{ .List = list });
+                    return;
+                }
+                if (std.mem.eql(u8, func.name, "__file_read__")) {
+                    if (arg_count != 0) return VMError.RuntimeError;
+                    const file_ptr = @as(*std.fs.File, @ptrCast(@alignCast(func.closure.?)));
+                    const content = file_ptr.readToEndAlloc(self.allocator, 1024 * 1024 * 10) catch return VMError.RuntimeError;
+                    self.stack.items.len = callee_index;
+                    try self.push(Value{ .String = content });
+                    return;
+                }
+                if (std.mem.eql(u8, func.name, "__file_write__")) {
+                    if (arg_count != 1) return VMError.RuntimeError;
+                    const val = self.stack.items[callee_index + 1];
+                    if (val != .String) return VMError.TypeError;
+                    const file_ptr = @as(*std.fs.File, @ptrCast(@alignCast(func.closure.?)));
+                    file_ptr.writeAll(val.String) catch return VMError.RuntimeError;
+                    self.stack.items.len = callee_index;
+                    try self.push(Value{ .Nil = {} });
+                    return;
+                }
+                if (std.mem.eql(u8, func.name, "__file_close__")) {
+                    if (arg_count != 0) return VMError.RuntimeError;
+                    const file_ptr = @as(*std.fs.File, @ptrCast(@alignCast(func.closure.?)));
+                    file_ptr.close();
+                    self.stack.items.len = callee_index;
+                    try self.push(Value{ .Nil = {} });
+                    return;
+                }
+                return VMError.RuntimeError;
             },
             else => return VMError.RuntimeError,
         }

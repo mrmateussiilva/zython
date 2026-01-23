@@ -36,6 +36,7 @@ pub const OpCode = enum(u8) {
     JumpIfFalse,
     Loop,
     Call,
+    GetAttr,
     Return,
     BuildList,
     GetSubscript,
