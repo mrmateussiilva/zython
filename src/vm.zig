@@ -79,8 +79,10 @@ pub const VM = struct {
         if (func.globals == null) func.globals = self.globals;
         try self.frames.append(self.allocator, .{ .func = func, .globals = self.globals, .ip = 0, .base = 0 });
 
-        if (func.locals_count > 0) {
-            try self.stack.ensureTotalCapacity(self.allocator, func.locals_count);
+        {
+            const base_capacity: usize = 256;
+            const needed = if (func.locals_count > base_capacity) func.locals_count else base_capacity;
+            try self.stack.ensureTotalCapacity(self.allocator, needed);
             while (self.stack.items.len < func.locals_count) {
                 self.stack.appendAssumeCapacity(Value{ .Nil = {} });
             }
@@ -365,8 +367,7 @@ pub const VM = struct {
                 .BuildList => {
                     const count = self.readU16(frame, code);
                     const start = self.stack.items.len - count;
-                    var elements = std.ArrayList(Value){};
-                    try elements.ensureTotalCapacity(self.allocator, count);
+                    var elements = try std.ArrayList(Value).initCapacity(self.allocator, count);
                     for (self.stack.items[start..]) |v| {
                         elements.appendAssumeCapacity(v);
                     }
@@ -382,6 +383,7 @@ pub const VM = struct {
                     const start = self.stack.items.len - (count * 2);
                     const dict = try self.allocator.create(AST.LoxDict);
                     dict.* = AST.LoxDict.init(self.allocator);
+                    try dict.ensureTotalCapacity(count);
 
                     var i: usize = 0;
                     while (i < count) : (i += 1) {
