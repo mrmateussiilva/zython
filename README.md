@@ -2,11 +2,11 @@
 
 > **Zython** é uma implementação leve e educacional de um interpretador para a linguagem Python, construído inteiramente utilizando **Zig**.
 
-O projeto explora os fundamentos da construção de linguagens (Lexing, Parsing, ASTs, Interpretação) com foco em performance e gerenciamento de memória manual.
+O projeto explora os fundamentos da construção de linguagens (Lexing, Parsing, ASTs, Interpretação e Bytecode/VM) com foco em performance e gerenciamento de memória manual.
 
 ## ✨ Funcionalidades Implementadas (Status Atual)
 
-O interpretador já suporta um subconjunto rico da linguagem:
+O interpretador já suporta um subconjunto rico da linguagem (via VM de bytecode com fallback para tree-walker quando algo ainda não é suportado):
 
 *   **Orientação a Objetos**:
     *   Definição de Classes (`class Nome:`).
@@ -57,6 +57,11 @@ Para o Zython ser útil em scripts reais, as seguintes funcionalidades são prio
     ```bash
     zig build run -- examples/hello.py
     ```
+    
+1.  **Executar em ReleaseFast**:
+    ```bash
+    zig build run-release -- examples/hello.py
+    ```
 
 2.  **Testando Classes**:
     ```bash
@@ -87,3 +92,6 @@ Para o Zython ser útil em scripts reais, as seguintes funcionalidades são prio
     ```bash
     zig build run
     ```
+
+### Observação sobre a VM
+A VM de bytecode cobre os recursos mais usados (expressões, funções, listas, dicionários, imports e try/raise simples). Quando algo ainda não é suportado, o Zython recai automaticamente no tree‑walker.

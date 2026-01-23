@@ -6,11 +6,13 @@ Esta documentação detalha a arquitetura interna, as decisões de design e a es
 
 ## 1. Arquitetura do Sistema
 
-O Zython segue a arquitetura clássica de um interpretador *Tree-Walk* (percorredor de árvore). O fluxo de dados é linear:
+O Zython segue a arquitetura clássica de um interpretador *Tree-Walk* (percorredor de árvore), mas agora possui uma VM de bytecode. O fluxo principal é:
 
 ```mermaid
-Source Code (.py) -> [Lexer] -> Tokens -> [Parser] -> AST -> [Interpreter] -> Resultado
+Source Code (.py) -> [Lexer] -> Tokens -> [Parser] -> AST -> [Resolver] -> [Compiler] -> Bytecode -> [VM] -> Resultado
 ```
+
+Quando um recurso ainda não está disponível na VM, o Zython faz fallback para o interpretador Tree‑Walk.
 
 ### 1.1 Gerenciamento de Memória (Arena Allocator)
 Uma das maiores vantagens do Zython é o uso de **Arena Allocation**.
@@ -43,7 +45,7 @@ Exemplo da estrutura `Expr` (Expressão):
 pub const Expr = union(enum) {
     Binary: struct { left: *Expr, op: BinaryOp, right: *Expr },
     Literal: Value,
-    Variable: []const u8,
+    Variable: struct { name: []const u8, depth: i32, slot: i32 },
     // ...
 };
 ```
@@ -52,6 +54,12 @@ pub const Expr = union(enum) {
 O cérebro da operação. Ele "caminha" pela AST gerada e executa as ações.
 *   **Environment (Ambiente)**: Usa um `StringHashMap` para armazenar variáveis. Atualmente, suporta escopo global. No futuro, suportará escopos aninhados (local vs global) para funções.
 *   **Sistema de Tipos (`Value`)**: O Zython é dinamicamente tipado. O `Value` é uma union que pode ser `Number`, `Boolean`, `String` ou `Nil`. O interpretador verifica os tipos em tempo de execução (Runtime Type Checking) antes de realizar operações.
+
+### 2.5 VM de Bytecode (`src/compiler.zig`, `src/vm.zig`)
+A VM executa bytecode compilado a partir da AST, reduzindo o overhead do tree‑walker.
+*   **Compiler**: gera `Chunk` com opcodes e constantes.
+*   **VM**: executa opcodes em uma pilha de `Value`.
+*   **Resolver**: calcula profundidade e slots de variáveis locais antes da compilação.
 
 ---
 

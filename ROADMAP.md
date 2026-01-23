@@ -26,7 +26,7 @@ Implementação de módulos essenciais em Zig para dar "baterias" à linguagem.
 Melhorias profundas no núcleo do interpretador.
 
 - [ ] **Garbage Collector (GC)**: Substituir o `ArenaAllocator` (que libera memória apenas no final) por um GC real (Mark-and-Sweep ou Reference Counting) para permitir execução de longa duração.
-- [ ] **Bytecode Compiler & VM**: Migrar de interpretador Tree-Walk (AST) para uma Máquina Virtual de Bytecode para ganho significativo de performance.
+- [x] **Bytecode Compiler & VM**: Migrar de interpretador Tree-Walk (AST) para uma Máquina Virtual de Bytecode para ganho significativo de performance.
 - [ ] **REPL Melhorado**: Histórico de comandos, auto-complete, multiline editing.
 
 ## 🔌 Fase 4: Interoperabilidade
