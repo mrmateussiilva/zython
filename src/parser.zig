@@ -226,14 +226,49 @@ pub const Parser = struct {
         
         if (try self.match(&.{.Equal})) {
              const value = try self.expression();
-             switch (expr) {
+             return self.finishAssignment(expr, value);
+        }
+
+        if (try self.match(&.{.PlusEqual, .MinusEqual, .StarEqual, .SlashEqual})) {
+            const op_token = self.previous;
+            const value = try self.expression();
+            
+            const left_ptr = try self.allocator.create(Expr);
+            left_ptr.* = expr;
+            
+            const right_ptr = try self.allocator.create(Expr);
+            right_ptr.* = value;
+            
+            const op = switch (op_token.type) {
+                .PlusEqual => AST.BinaryOp.Add,
+                .MinusEqual => AST.BinaryOp.Sub,
+                .StarEqual => AST.BinaryOp.Mul,
+                .SlashEqual => AST.BinaryOp.Div,
+                else => unreachable,
+            };
+            
+            const desugared_value = Expr{ .Binary = .{
+                .left = left_ptr,
+                .op = op,
+                .right = right_ptr
+            }};
+            
+            return self.finishAssignment(expr, desugared_value);
+        }
+        
+        if (self.check(.Newline)) _ = try self.advance();
+        return Stmt{ .Expression = .{ .expression = expr } };
+    }
+
+    fn finishAssignment(self: *Parser, lvalue: Expr, rvalue: Expr) ParserError!Stmt {
+             switch (lvalue) {
                  .Variable => |name| {
                      if (self.check(.Newline)) _ = try self.advance();
-                     return Stmt{ .Var = .{ .name = name, .initializer = value } };
+                     return Stmt{ .Var = .{ .name = name, .initializer = rvalue } };
                  },
                  .Get => |get| {
                      const valuePtr = try self.allocator.create(Expr);
-                     valuePtr.* = value;
+                     valuePtr.* = rvalue;
                      if (self.check(.Newline)) _ = try self.advance();
                      return Stmt{ .Expression = .{ .expression = Expr{ .Set = .{ 
                          .object = get.object, 
@@ -243,7 +278,7 @@ pub const Parser = struct {
                  },
                  .Subscript => |subs| {
                      const valuePtr = try self.allocator.create(Expr);
-                     valuePtr.* = value;
+                     valuePtr.* = rvalue;
                      if (self.check(.Newline)) _ = try self.advance();
                      return Stmt{ .Expression = .{ .expression = Expr{ .SetSubscript = .{
                          .object = subs.value,
@@ -255,10 +290,6 @@ pub const Parser = struct {
                      return ParserError.UnexpectedToken;
                  }
              }
-        }
-        
-        if (self.check(.Newline)) _ = try self.advance();
-        return Stmt{ .Expression = .{ .expression = expr } };
     }
 
     fn expression(self: *Parser) ParserError!Expr {

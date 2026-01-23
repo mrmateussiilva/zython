@@ -15,6 +15,7 @@ pub const TokenType = enum {
     Equal, EqualEqual,
     Greater, GreaterEqual,
     Less, LessEqual,
+    PlusEqual, MinusEqual, StarEqual, SlashEqual,
     Colon,
 
     // Especiais Python
