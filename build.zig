@@ -28,6 +28,25 @@ pub fn build(b: *std.Build) void {
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
+    // Comando 'run-release' (ReleaseFast)
+    const release_mod = b.createModule(.{
+        .root_source_file = b.path("src/main.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+
+    const release_exe = b.addExecutable(.{
+        .name = "zython-release",
+        .root_module = release_mod,
+    });
+
+    const run_release_cmd = b.addRunArtifact(release_exe);
+    if (b.args) |args| {
+        run_release_cmd.addArgs(args);
+    }
+    const run_release_step = b.step("run-release", "Run the app (ReleaseFast)");
+    run_release_step.dependOn(&run_release_cmd.step);
+
     // Configuração de Testes
     const tests_mod = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),

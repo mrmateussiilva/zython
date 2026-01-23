@@ -317,7 +317,9 @@ pub const Interpreter = struct {
                     .Add => {
                         if (left == .Number and right == .Number) return Value{ .Number = left.Number + right.Number };
                         if (left == .String and right == .String) {
-                            const res = try std.fmt.allocPrint(self.allocator, "{s}{s}", .{left.String, right.String});
+                            const res = try self.allocator.alloc(u8, left.String.len + right.String.len);
+                            std.mem.copy(u8, res[0..left.String.len], left.String);
+                            std.mem.copy(u8, res[left.String.len..], right.String);
                             return Value{ .String = res };
                         }
                         return InterpreterError.TypeError;
@@ -548,11 +550,20 @@ pub const Interpreter = struct {
     fn callValue(self: *Interpreter, callee: Value, args: []const Expr) InterpreterError!Value {
          switch (callee) {
             .NativeFunction => |native| {
-                var evaluatedArgs = std.ArrayList(Value){};
-                defer evaluatedArgs.deinit(self.allocator);
+                var stack_buf: [8]Value = undefined;
+                if (args.len <= stack_buf.len) {
+                    for (args, 0..) |argExpr, i| {
+                        stack_buf[i] = try self.evaluate(argExpr);
+                    }
+                    return native(self.allocator, stack_buf[0..args.len]);
+                }
+
+                var evaluatedArgs = std.ArrayList(Value).init(self.allocator);
+                defer evaluatedArgs.deinit();
+                try evaluatedArgs.ensureTotalCapacity(args.len);
                 for (args) |argExpr| {
                     const val = try self.evaluate(argExpr);
-                    try evaluatedArgs.append(self.allocator, val);
+                    evaluatedArgs.appendAssumeCapacity(val);
                 }
                 return native(self.allocator, evaluatedArgs.items);
             },
