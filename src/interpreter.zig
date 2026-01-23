@@ -169,8 +169,8 @@ pub const Interpreter = struct {
                 return null;
             },
             .Block => |b| {
-                const env = Environment.init(self.allocator, self.environment) catch return InterpreterError.OutOfMemory;
-                return try self.executeBlock(b.statements, env);
+                // Pythonic: blocks don't create scope
+                return try self.executeBlock(b.statements, self.environment);
             },
             .If => |s| {
                 const condition = try self.evaluate(s.condition);
