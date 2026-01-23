@@ -209,6 +209,11 @@ pub const Expr = union(enum) {
         value: *const Expr,
         index: *const Expr,
     },
+    Slice: struct {
+        value: *const Expr,
+        start: ?*const Expr,
+        end: ?*const Expr,
+    },
     SetSubscript: struct {
         object: *const Expr,
         index: *const Expr,

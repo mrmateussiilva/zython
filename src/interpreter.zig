@@ -493,6 +493,30 @@ pub const Interpreter = struct {
                                 .this_slot = -1,
                             }};
                         }
+                        if (std.mem.eql(u8, g.name, "lower")) {
+                            const ctx = try self.allocator.create([]const u8);
+                            ctx.* = s;
+                            return Value{ .Function = .{
+                                .name = "__str_lower__",
+                                .params = &[_][]const u8{},
+                                .body = &[_]Stmt{},
+                                .closure = @as(*anyopaque, @ptrCast(ctx)),
+                                .locals_count = 0,
+                                .this_slot = -1,
+                            }};
+                        }
+                        if (std.mem.eql(u8, g.name, "upper")) {
+                            const ctx = try self.allocator.create([]const u8);
+                            ctx.* = s;
+                            return Value{ .Function = .{
+                                .name = "__str_upper__",
+                                .params = &[_][]const u8{},
+                                .body = &[_]Stmt{},
+                                .closure = @as(*anyopaque, @ptrCast(ctx)),
+                                .locals_count = 0,
+                                .this_slot = -1,
+                            }};
+                        }
                         return InterpreterError.RuntimeError;
                     },
                     .List => |list| {
@@ -504,6 +528,39 @@ pub const Interpreter = struct {
                                 .params = @as([]const []const u8, &[_][]const u8{"item"}), // Dummy param
                                 .body = &[_]Stmt{}, // Empty body
                                 .closure = @as(*anyopaque, @ptrCast(list)),
+                                .locals_count = 0,
+                                .this_slot = -1,
+                            }};
+                        }
+                        if (std.mem.eql(u8, g.name, "pop")) {
+                            return Value{ .Function = .{
+                                .name = "__list_pop__",
+                                .params = @as([]const []const u8, &[_][]const u8{"index"}),
+                                .body = &[_]Stmt{},
+                                .closure = @as(*anyopaque, @ptrCast(list)),
+                                .locals_count = 0,
+                                .this_slot = -1,
+                            }};
+                        }
+                        if (std.mem.eql(u8, g.name, "extend")) {
+                            return Value{ .Function = .{
+                                .name = "__list_extend__",
+                                .params = @as([]const []const u8, &[_][]const u8{"items"}),
+                                .body = &[_]Stmt{},
+                                .closure = @as(*anyopaque, @ptrCast(list)),
+                                .locals_count = 0,
+                                .this_slot = -1,
+                            }};
+                        }
+                        return InterpreterError.RuntimeError;
+                    },
+                    .Dict => |dict| {
+                        if (std.mem.eql(u8, g.name, "get")) {
+                            return Value{ .Function = .{
+                                .name = "__dict_get__",
+                                .params = @as([]const []const u8, &[_][]const u8{"key", "default"}),
+                                .body = &[_]Stmt{},
+                                .closure = @as(*anyopaque, @ptrCast(dict)),
                                 .locals_count = 0,
                                 .this_slot = -1,
                             }};
@@ -627,6 +684,33 @@ pub const Interpreter = struct {
                     else => return InterpreterError.TypeError,
                 }
             },
+            .Slice => |s| {
+                const obj = try self.evaluate(s.value.*);
+                const start_val = if (s.start) |p| try self.evaluate(p.*) else Value{ .Nil = {} };
+                const end_val = if (s.end) |p| try self.evaluate(p.*) else Value{ .Nil = {} };
+
+                switch (obj) {
+                    .List => |list| {
+                        const bounds = try sliceBounds(start_val, end_val, list.elements.items.len);
+                        var elements = std.ArrayList(Value){};
+                        try elements.ensureTotalCapacity(self.allocator, bounds.len);
+                        if (bounds.len > 0) {
+                            for (list.elements.items[bounds.start..bounds.end]) |item| {
+                                elements.appendAssumeCapacity(item);
+                            }
+                        }
+                        const new_list = try self.allocator.create(AST.LoxList);
+                        new_list.* = AST.LoxList{ .elements = elements };
+                        return Value{ .List = new_list };
+                    },
+                    .String => |str| {
+                        const bounds = try sliceBounds(start_val, end_val, str.len);
+                        const slice = str[bounds.start..bounds.end];
+                        return Value{ .String = try self.allocator.dupe(u8, slice) };
+                    },
+                    else => return InterpreterError.TypeError,
+                }
+            },
             .SetSubscript => |setSub| {
                 const obj = try self.evaluate(setSub.object.*);
                 const indexVal = try self.evaluate(setSub.index.*);
@@ -718,12 +802,65 @@ pub const Interpreter = struct {
                     list.* = AST.LoxList{ .elements = parts };
                     return Value{ .List = list };
                 }
+                if (std.mem.eql(u8, func.name, "__str_lower__")) {
+                    if (args.len != 0) return InterpreterError.RuntimeError;
+                    const strPtr = @as(*[]const u8, @ptrCast(@alignCast(func.closure)));
+                    const duped = try self.allocator.dupe(u8, strPtr.*);
+                    _ = std.ascii.lowerString(duped, duped);
+                    return Value{ .String = duped };
+                }
+                if (std.mem.eql(u8, func.name, "__str_upper__")) {
+                    if (args.len != 0) return InterpreterError.RuntimeError;
+                    const strPtr = @as(*[]const u8, @ptrCast(@alignCast(func.closure)));
+                    const duped = try self.allocator.dupe(u8, strPtr.*);
+                    _ = std.ascii.upperString(duped, duped);
+                    return Value{ .String = duped };
+                }
 
                 if (std.mem.eql(u8, func.name, "__list_append__")) {
                     if (args.len != 1) return InterpreterError.RuntimeError;
                     const list = @as(*AST.LoxList, @ptrCast(@alignCast(func.closure)));
                     const val = try self.evaluate(args[0]);
                     try list.elements.append(self.allocator, val);
+                    return Value{ .Nil = {} };
+                }
+                if (std.mem.eql(u8, func.name, "__list_pop__")) {
+                    if (args.len > 1) return InterpreterError.RuntimeError;
+                    const list = @as(*AST.LoxList, @ptrCast(@alignCast(func.closure)));
+                    if (list.elements.items.len == 0) return InterpreterError.RuntimeError;
+                    var idx: isize = @as(isize, @intCast(list.elements.items.len - 1));
+                    if (args.len == 1) {
+                        const val = try self.evaluate(args[0]);
+                        if (val != .Number) return InterpreterError.TypeError;
+                        idx = @as(isize, @intFromFloat(val.Number));
+                    }
+                    if (idx < 0) idx += @as(isize, @intCast(list.elements.items.len));
+                    if (idx < 0 or idx >= @as(isize, @intCast(list.elements.items.len))) return InterpreterError.RuntimeError;
+                    const uidx = @as(usize, @intCast(idx));
+                    const value = list.elements.items[uidx];
+                    _ = list.elements.orderedRemove(uidx);
+                    return value;
+                }
+                if (std.mem.eql(u8, func.name, "__list_extend__")) {
+                    if (args.len != 1) return InterpreterError.RuntimeError;
+                    const list = @as(*AST.LoxList, @ptrCast(@alignCast(func.closure)));
+                    const val = try self.evaluate(args[0]);
+                    if (val != .List) return InterpreterError.TypeError;
+                    for (val.List.elements.items) |item| {
+                        try list.elements.append(self.allocator, item);
+                    }
+                    return Value{ .Nil = {} };
+                }
+                if (std.mem.eql(u8, func.name, "__dict_get__")) {
+                    if (args.len < 1 or args.len > 2) return InterpreterError.RuntimeError;
+                    const dict = @as(*AST.LoxDict, @ptrCast(@alignCast(func.closure)));
+                    const key = try self.evaluate(args[0]);
+                    if (dict.get(key)) |val| {
+                        return val;
+                    }
+                    if (args.len == 2) {
+                        return try self.evaluate(args[1]);
+                    }
                     return Value{ .Nil = {} };
                 }
 
@@ -837,6 +974,41 @@ pub const Interpreter = struct {
             .Dict => |d| return d.count() > 0,
             .Module => return true,
         }
+    }
+
+    const SliceBounds = struct {
+        start: usize,
+        end: usize,
+        len: usize,
+    };
+
+    fn sliceBounds(start_val: Value, end_val: Value, len: usize) InterpreterError!SliceBounds {
+        var start: isize = 0;
+        var end: isize = @as(isize, @intCast(len));
+
+        if (start_val != .Nil) {
+            if (start_val != .Number) return InterpreterError.TypeError;
+            start = @as(isize, @intFromFloat(start_val.Number));
+        }
+        if (end_val != .Nil) {
+            if (end_val != .Number) return InterpreterError.TypeError;
+            end = @as(isize, @intFromFloat(end_val.Number));
+        }
+
+        if (start < 0) start += @as(isize, @intCast(len));
+        if (end < 0) end += @as(isize, @intCast(len));
+
+        if (start < 0) start = 0;
+        if (end < 0) end = 0;
+        if (start > @as(isize, @intCast(len))) start = @as(isize, @intCast(len));
+        if (end > @as(isize, @intCast(len))) end = @as(isize, @intCast(len));
+        if (end < start) end = start;
+
+        return .{
+            .start = @as(usize, @intCast(start)),
+            .end = @as(usize, @intCast(end)),
+            .len = @as(usize, @intCast(end - start)),
+        };
     }
 
     fn isEqual(self: *Interpreter, a: Value, b: Value) bool {

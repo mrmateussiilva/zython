@@ -26,7 +26,9 @@ O interpretador já suporta um subconjunto rico da linguagem (via VM de bytecode
     *   Listas/Arrays: `x = [1, 2, 3]`.
     *   Dicionários/Maps: `d = {'a': 1, 2: 'b'}`.
     *   Indexação e modificação: `x[0] = 10`, `d['a'] = 20`.
+    *   Slices: `x[1:3]`, `x[:2]`, `x[2:]`.
     *   Métodos nativos: `.append()`, `len()`.
+    *   Métodos adicionais: `.pop()`, `.extend()`, `.get()`, `.lower()`, `.upper()`.
     *   Arquivos: `open()`, `read()`, `write()`, `close()`.
     *   Strings: `.split()`, `.strip()`.
     *   Números (`float64`).
@@ -61,6 +63,11 @@ Para o Zython ser útil em scripts reais, as seguintes funcionalidades são prio
 1.  **Executar em ReleaseFast**:
     ```bash
     zig build run-release -- examples/hello.py
+    ```
+
+1.  **Slices e Métodos**:
+    ```bash
+    zig build run-release -- examples/slice_methods.py
     ```
 
 2.  **Testando Classes**:

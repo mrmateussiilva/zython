@@ -103,3 +103,16 @@ vazio = None    # Nil
 
 ### Funções Built-in
 *   `print(arg)`: Imprime o argumento no stdout e pula uma linha.
+*   `len(obj)`: Retorna o tamanho de listas, strings e dicionários.
+
+### Slices
+*   Listas e strings suportam slices simples: `x[1:3]`, `x[:2]`, `x[2:]`, `x[-3:-1]`.
+
+### Métodos de Lista
+*   `.append(item)`, `.pop(index?)`, `.extend(list)`
+
+### Métodos de String
+*   `.split(delim)`, `.strip()`, `.lower()`, `.upper()`
+
+### Métodos de Dicionário
+*   `.get(key, default?)`

@@ -462,13 +462,47 @@ pub const Parser = struct {
                 exprPtr.* = expr;
                 expr = Expr{ .Get = .{ .object = exprPtr, .name = name.lexeme } };
             } else if (try self.match(&.{.LeftBracket})) {
-                const index = try self.expression();
-                _ = try self.consume(.RightBracket, "Expect ']' after subscript.");
-                const exprPtr = try self.allocator.create(Expr);
-                exprPtr.* = expr;
-                const indexPtr = try self.allocator.create(Expr);
-                indexPtr.* = index;
-                expr = Expr{ .Subscript = .{ .value = exprPtr, .index = indexPtr } };
+                if (try self.match(&.{.Colon})) {
+                    var end_expr: ?Expr = null;
+                    if (!self.check(.RightBracket)) {
+                        end_expr = try self.expression();
+                    }
+                    _ = try self.consume(.RightBracket, "Expect ']' after slice.");
+                    const exprPtr = try self.allocator.create(Expr);
+                    exprPtr.* = expr;
+                    const endPtr = if (end_expr) |e| blk: {
+                        const p = try self.allocator.create(Expr);
+                        p.* = e;
+                        break :blk p;
+                    } else null;
+                    expr = Expr{ .Slice = .{ .value = exprPtr, .start = null, .end = endPtr } };
+                } else {
+                    const first = try self.expression();
+                    if (try self.match(&.{.Colon})) {
+                        var end_expr: ?Expr = null;
+                        if (!self.check(.RightBracket)) {
+                            end_expr = try self.expression();
+                        }
+                        _ = try self.consume(.RightBracket, "Expect ']' after slice.");
+                        const exprPtr = try self.allocator.create(Expr);
+                        exprPtr.* = expr;
+                        const startPtr = try self.allocator.create(Expr);
+                        startPtr.* = first;
+                        const endPtr = if (end_expr) |e| blk: {
+                            const p = try self.allocator.create(Expr);
+                            p.* = e;
+                            break :blk p;
+                        } else null;
+                        expr = Expr{ .Slice = .{ .value = exprPtr, .start = startPtr, .end = endPtr } };
+                    } else {
+                        _ = try self.consume(.RightBracket, "Expect ']' after subscript.");
+                        const exprPtr = try self.allocator.create(Expr);
+                        exprPtr.* = expr;
+                        const indexPtr = try self.allocator.create(Expr);
+                        indexPtr.* = first;
+                        expr = Expr{ .Subscript = .{ .value = exprPtr, .index = indexPtr } };
+                    }
+                }
             } else {
                 break;
             }

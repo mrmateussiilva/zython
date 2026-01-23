@@ -256,16 +256,43 @@ pub const VM = struct {
                             }
                         },
                         .List => |list| {
-                            if (!std.mem.eql(u8, name.String, "append")) return VMError.RuntimeError;
-                            const fn_val = Value{ .Function = .{
-                                .name = "__list_append__",
-                                .params = @as([]const []const u8, &[_][]const u8{"item"}),
-                                .body = &[_]AST.Stmt{},
-                                .closure = @as(*anyopaque, @ptrCast(list)),
-                                .locals_count = 0,
-                                .this_slot = -1,
-                            }};
-                            try self.push(fn_val);
+                            if (std.mem.eql(u8, name.String, "append")) {
+                                const fn_val = Value{ .Function = .{
+                                    .name = "__list_append__",
+                                    .params = @as([]const []const u8, &[_][]const u8{"item"}),
+                                    .body = &[_]AST.Stmt{},
+                                    .closure = @as(*anyopaque, @ptrCast(list)),
+                                    .locals_count = 0,
+                                    .this_slot = -1,
+                                }};
+                                try self.push(fn_val);
+                                break;
+                            }
+                            if (std.mem.eql(u8, name.String, "pop")) {
+                                const fn_val = Value{ .Function = .{
+                                    .name = "__list_pop__",
+                                    .params = @as([]const []const u8, &[_][]const u8{"index"}),
+                                    .body = &[_]AST.Stmt{},
+                                    .closure = @as(*anyopaque, @ptrCast(list)),
+                                    .locals_count = 0,
+                                    .this_slot = -1,
+                                }};
+                                try self.push(fn_val);
+                                break;
+                            }
+                            if (std.mem.eql(u8, name.String, "extend")) {
+                                const fn_val = Value{ .Function = .{
+                                    .name = "__list_extend__",
+                                    .params = @as([]const []const u8, &[_][]const u8{"items"}),
+                                    .body = &[_]AST.Stmt{},
+                                    .closure = @as(*anyopaque, @ptrCast(list)),
+                                    .locals_count = 0,
+                                    .this_slot = -1,
+                                }};
+                                try self.push(fn_val);
+                                break;
+                            }
+                            return VMError.RuntimeError;
                         },
                         .String => |s| {
                             if (std.mem.eql(u8, name.String, "strip")) {
@@ -296,7 +323,47 @@ pub const VM = struct {
                                 try self.push(fn_val);
                                 break;
                             }
+                            if (std.mem.eql(u8, name.String, "lower")) {
+                                const ctx = try self.allocator.create([]const u8);
+                                ctx.* = s;
+                                const fn_val = Value{ .Function = .{
+                                    .name = "__str_lower__",
+                                    .params = &[_][]const u8{},
+                                    .body = &[_]AST.Stmt{},
+                                    .closure = @as(*anyopaque, @ptrCast(ctx)),
+                                    .locals_count = 0,
+                                    .this_slot = -1,
+                                }};
+                                try self.push(fn_val);
+                                break;
+                            }
+                            if (std.mem.eql(u8, name.String, "upper")) {
+                                const ctx = try self.allocator.create([]const u8);
+                                ctx.* = s;
+                                const fn_val = Value{ .Function = .{
+                                    .name = "__str_upper__",
+                                    .params = &[_][]const u8{},
+                                    .body = &[_]AST.Stmt{},
+                                    .closure = @as(*anyopaque, @ptrCast(ctx)),
+                                    .locals_count = 0,
+                                    .this_slot = -1,
+                                }};
+                                try self.push(fn_val);
+                                break;
+                            }
                             return VMError.RuntimeError;
+                        },
+                        .Dict => |dict| {
+                            if (!std.mem.eql(u8, name.String, "get")) return VMError.RuntimeError;
+                            const fn_val = Value{ .Function = .{
+                                .name = "__dict_get__",
+                                .params = @as([]const []const u8, &[_][]const u8{"key", "default"}),
+                                .body = &[_]AST.Stmt{},
+                                .closure = @as(*anyopaque, @ptrCast(dict)),
+                                .locals_count = 0,
+                                .this_slot = -1,
+                            }};
+                            try self.push(fn_val);
                         },
                         .File => |f| {
                             const ctx = try self.allocator.create(std.fs.File);
@@ -417,6 +484,33 @@ pub const VM = struct {
                         else => return VMError.TypeError,
                     }
                 },
+                .Slice => {
+                    const end_val = self.pop();
+                    const start_val = self.pop();
+                    const obj = self.pop();
+                    switch (obj) {
+                        .List => |list| {
+                            const len = list.elements.items.len;
+                            const bounds = try sliceBounds(start_val, end_val, len);
+                            var elements = try std.ArrayList(Value).initCapacity(self.allocator, bounds.len);
+                            if (bounds.len > 0) {
+                                const src = list.elements.items[bounds.start..bounds.end];
+                                for (src) |v| elements.appendAssumeCapacity(v);
+                            }
+                            const new_list = try self.allocator.create(AST.LoxList);
+                            new_list.* = AST.LoxList{ .elements = elements };
+                            try self.push(Value{ .List = new_list });
+                        },
+                        .String => |s| {
+                            const len = s.len;
+                            const bounds = try sliceBounds(start_val, end_val, len);
+                            const slice = s[bounds.start..bounds.end];
+                            const duped = try self.allocator.dupe(u8, slice);
+                            try self.push(Value{ .String = duped });
+                        },
+                        else => return VMError.TypeError,
+                    }
+                },
                 .SetSubscript => {
                     const value = self.pop();
                     const index = self.pop();
@@ -519,6 +613,37 @@ pub const VM = struct {
                     try self.push(Value{ .Nil = {} });
                     return;
                 }
+                if (std.mem.eql(u8, func.name, "__list_pop__")) {
+                    if (arg_count > 1) return VMError.RuntimeError;
+                    const list = @as(*AST.LoxList, @ptrCast(@alignCast(func.closure.?)));
+                    if (list.elements.items.len == 0) return VMError.RuntimeError;
+                    var idx: isize = @as(isize, @intCast(list.elements.items.len - 1));
+                    if (arg_count == 1) {
+                        const v = self.stack.items[callee_index + 1];
+                        if (v != .Number) return VMError.TypeError;
+                        idx = @as(isize, @intFromFloat(v.Number));
+                    }
+                    if (idx < 0) idx += @as(isize, @intCast(list.elements.items.len));
+                    if (idx < 0 or idx >= @as(isize, @intCast(list.elements.items.len))) return VMError.RuntimeError;
+                    const uidx = @as(usize, @intCast(idx));
+                    const value = list.elements.items[uidx];
+                    _ = list.elements.orderedRemove(uidx);
+                    self.stack.items.len = callee_index;
+                    try self.push(value);
+                    return;
+                }
+                if (std.mem.eql(u8, func.name, "__list_extend__")) {
+                    if (arg_count != 1) return VMError.RuntimeError;
+                    const list = @as(*AST.LoxList, @ptrCast(@alignCast(func.closure.?)));
+                    const other = self.stack.items[callee_index + 1];
+                    if (other != .List) return VMError.TypeError;
+                    for (other.List.elements.items) |item| {
+                        try list.elements.append(self.allocator, item);
+                    }
+                    self.stack.items.len = callee_index;
+                    try self.push(Value{ .Nil = {} });
+                    return;
+                }
                 if (std.mem.eql(u8, func.name, "__str_strip__")) {
                     if (arg_count != 0) return VMError.RuntimeError;
                     const str_ptr = @as(*[]const u8, @ptrCast(@alignCast(func.closure.?)));
@@ -544,6 +669,38 @@ pub const VM = struct {
                     list.* = AST.LoxList{ .elements = parts };
                     self.stack.items.len = callee_index;
                     try self.push(Value{ .List = list });
+                    return;
+                }
+                if (std.mem.eql(u8, func.name, "__str_lower__")) {
+                    if (arg_count != 0) return VMError.RuntimeError;
+                    const str_ptr = @as(*[]const u8, @ptrCast(@alignCast(func.closure.?)));
+                    const duped = try self.allocator.dupe(u8, str_ptr.*);
+                    _ = std.ascii.lowerString(duped, duped);
+                    self.stack.items.len = callee_index;
+                    try self.push(Value{ .String = duped });
+                    return;
+                }
+                if (std.mem.eql(u8, func.name, "__str_upper__")) {
+                    if (arg_count != 0) return VMError.RuntimeError;
+                    const str_ptr = @as(*[]const u8, @ptrCast(@alignCast(func.closure.?)));
+                    const duped = try self.allocator.dupe(u8, str_ptr.*);
+                    _ = std.ascii.upperString(duped, duped);
+                    self.stack.items.len = callee_index;
+                    try self.push(Value{ .String = duped });
+                    return;
+                }
+                if (std.mem.eql(u8, func.name, "__dict_get__")) {
+                    if (arg_count < 1 or arg_count > 2) return VMError.RuntimeError;
+                    const dict = @as(*AST.LoxDict, @ptrCast(@alignCast(func.closure.?)));
+                    const key = self.stack.items[callee_index + 1];
+                    const default_val = if (arg_count == 2) self.stack.items[callee_index + 2] else Value{ .Nil = {} };
+                    if (dict.get(key)) |val| {
+                        self.stack.items.len = callee_index;
+                        try self.push(val);
+                        return;
+                    }
+                    self.stack.items.len = callee_index;
+                    try self.push(default_val);
                     return;
                 }
                 if (std.mem.eql(u8, func.name, "__file_read__")) {
@@ -684,6 +841,41 @@ fn isEqual(a: Value, b: Value) bool {
         .File => a.File.handle == b.File.handle,
         .Dict => a.Dict == b.Dict,
         .Module => a.Module.exports == b.Module.exports,
+    };
+}
+
+const SliceBounds = struct {
+    start: usize,
+    end: usize,
+    len: usize,
+};
+
+fn sliceBounds(start_val: Value, end_val: Value, len: usize) VMError!SliceBounds {
+    var start: isize = 0;
+    var end: isize = @as(isize, @intCast(len));
+
+    if (start_val != .Nil) {
+        if (start_val != .Number) return VMError.TypeError;
+        start = @as(isize, @intFromFloat(start_val.Number));
+    }
+    if (end_val != .Nil) {
+        if (end_val != .Number) return VMError.TypeError;
+        end = @as(isize, @intFromFloat(end_val.Number));
+    }
+
+    if (start < 0) start += @as(isize, @intCast(len));
+    if (end < 0) end += @as(isize, @intCast(len));
+
+    if (start < 0) start = 0;
+    if (end < 0) end = 0;
+    if (start > @as(isize, @intCast(len))) start = @as(isize, @intCast(len));
+    if (end > @as(isize, @intCast(len))) end = @as(isize, @intCast(len));
+    if (end < start) end = start;
+
+    return .{
+        .start = @as(usize, @intCast(start)),
+        .end = @as(usize, @intCast(end)),
+        .len = @as(usize, @intCast(end - start)),
     };
 }
 

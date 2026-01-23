@@ -45,6 +45,7 @@ pub const OpCode = enum(u8) {
     BuildList,
     BuildDict,
     GetSubscript,
+    Slice,
     SetSubscript,
     ListLen,
 };

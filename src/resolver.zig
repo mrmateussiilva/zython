@@ -222,6 +222,11 @@ pub const Resolver = struct {
                 try self.resolveExpr(@constCast(s.value));
                 try self.resolveExpr(@constCast(s.index));
             },
+            .Slice => |*s| {
+                try self.resolveExpr(@constCast(s.value));
+                if (s.start) |start| try self.resolveExpr(@constCast(start));
+                if (s.end) |end| try self.resolveExpr(@constCast(end));
+            },
             .SetSubscript => |*s| {
                 try self.resolveExpr(@constCast(s.object));
                 try self.resolveExpr(@constCast(s.index));

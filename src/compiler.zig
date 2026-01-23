@@ -387,6 +387,20 @@ pub const Compiler = struct {
                 try self.compileExpr(@constCast(s.index));
                 try self.emitOp(.GetSubscript);
             },
+            .Slice => |*s| {
+                try self.compileExpr(@constCast(s.value));
+                if (s.start) |start| {
+                    try self.compileExpr(@constCast(start));
+                } else {
+                    try self.emitOp(.Nil);
+                }
+                if (s.end) |end| {
+                    try self.compileExpr(@constCast(end));
+                } else {
+                    try self.emitOp(.Nil);
+                }
+                try self.emitOp(.Slice);
+            },
             .SetSubscript => |*s| {
                 try self.compileExpr(@constCast(s.object));
                 try self.compileExpr(@constCast(s.index));
