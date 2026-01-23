@@ -29,6 +29,7 @@ pub const Value = union(enum) {
     Class: *LoxClass,
     Instance: *LoxInstance,
     List: *LoxList,
+    NativeFunction: *const fn(allocator: std.mem.Allocator, args: []const Value) InterpreterError!Value,
     
     pub fn toString(self: Value, allocator: std.mem.Allocator) ![]u8 {
         switch (self) {
@@ -37,6 +38,7 @@ pub const Value = union(enum) {
             .Number => |n| return std.fmt.allocPrint(allocator, "{d}", .{n}),
             .String => |s| return try allocator.dupe(u8, s),
             .Function => |f| return try std.fmt.allocPrint(allocator, "<function {s}>", .{f.name}),
+            .NativeFunction => |_| return try allocator.dupe(u8, "<native fn>"),
             .Class => |c| return try std.fmt.allocPrint(allocator, "<class {s}>", .{c.name}),
             .Instance => |i| return try std.fmt.allocPrint(allocator, "<{s} instance>", .{i.klass.name}),
             .List => |l| {
@@ -55,6 +57,14 @@ pub const Value = union(enum) {
             },
         }
     }
+};
+
+pub const InterpreterError = error{
+    RuntimeError,
+    TypeError,
+    UndefinedVariable,
+    Return, 
+    OutOfMemory,
 };
 
 pub const BinaryOp = enum {

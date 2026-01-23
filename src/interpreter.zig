@@ -5,13 +5,7 @@ const Stmt = AST.Stmt;
 const Value = AST.Value;
 const BinaryOp = AST.BinaryOp;
 
-pub const InterpreterError = error{
-    RuntimeError,
-    TypeError,
-    UndefinedVariable,
-    Return, 
-    OutOfMemory,
-};
+pub const InterpreterError = AST.InterpreterError;
 
 const Environment = struct {
     values: std.StringHashMap(Value),
@@ -60,6 +54,22 @@ const Environment = struct {
     }
 };
 
+fn nativeLen(allocator: std.mem.Allocator, args: []const Value) InterpreterError!Value {
+    _ = allocator;
+    if (args.len != 1) {
+        std.debug.print("len() takes exactly one argument.\n", .{});
+        return InterpreterError.RuntimeError;
+    }
+    switch (args[0]) {
+        .String => |s| return Value{ .Number = @as(f64, @floatFromInt(s.len)) },
+        .List => |l| return Value{ .Number = @as(f64, @floatFromInt(l.elements.items.len)) },
+        else => {
+            std.debug.print("Object of type 'number' has no len().\n", .{}); // Generic error message mimicking Python
+            return InterpreterError.TypeError;
+        }
+    }
+}
+
 pub const Interpreter = struct {
     globals: *Environment,
     environment: *Environment,
@@ -67,6 +77,7 @@ pub const Interpreter = struct {
 
     pub fn init(allocator: std.mem.Allocator) !Interpreter {
         const globals = try Environment.init(allocator, null);
+        try globals.define("len", Value{ .NativeFunction = nativeLen });
         return Interpreter{
             .globals = globals,
             .environment = globals,
@@ -364,6 +375,15 @@ pub const Interpreter = struct {
 
     fn callValue(self: *Interpreter, callee: Value, args: []const Expr) InterpreterError!Value {
          switch (callee) {
+            .NativeFunction => |native| {
+                var evaluatedArgs = std.ArrayList(Value){};
+                defer evaluatedArgs.deinit(self.allocator);
+                for (args) |argExpr| {
+                    const val = try self.evaluate(argExpr);
+                    try evaluatedArgs.append(self.allocator, val);
+                }
+                return native(self.allocator, evaluatedArgs.items);
+            },
             .Function => |func| {
                 if (std.mem.eql(u8, func.name, "__list_append__")) {
                     if (args.len != 1) return InterpreterError.RuntimeError;
@@ -457,6 +477,7 @@ pub const Interpreter = struct {
             .Number => |n| return n != 0,
             .String => |s| return s.len > 0,
             .Function => return true,
+            .NativeFunction => return true,
             .Class => return true,
             .Instance => return true,
             .List => |l| return l.elements.items.len > 0,
@@ -472,6 +493,7 @@ pub const Interpreter = struct {
              .Number => return a.Number == b.Number,
              .String => return std.mem.eql(u8, a.String, b.String), 
              .Function => return false, 
+             .NativeFunction => return false,
              .Class => |c1| return c1 == b.Class,
              .Instance => |inst1| return inst1 == b.Instance,
              .List => |l1| return l1 == b.List, // Identity check
