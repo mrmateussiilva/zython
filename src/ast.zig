@@ -29,6 +29,7 @@ pub const Value = union(enum) {
     Class: *LoxClass,
     Instance: *LoxInstance,
     List: *LoxList,
+    File: std.fs.File,
     NativeFunction: *const fn(allocator: std.mem.Allocator, args: []const Value) InterpreterError!Value,
     
     pub fn toString(self: Value, allocator: std.mem.Allocator) ![]u8 {
@@ -41,6 +42,7 @@ pub const Value = union(enum) {
             .NativeFunction => |_| return try allocator.dupe(u8, "<native fn>"),
             .Class => |c| return try std.fmt.allocPrint(allocator, "<class {s}>", .{c.name}),
             .Instance => |i| return try std.fmt.allocPrint(allocator, "<{s} instance>", .{i.klass.name}),
+            .File => |_| return try allocator.dupe(u8, "<file>"),
             .List => |l| {
                 var list_str = std.ArrayList(u8){};
                 defer list_str.deinit(allocator);

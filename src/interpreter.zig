@@ -70,6 +70,24 @@ fn nativeLen(allocator: std.mem.Allocator, args: []const Value) InterpreterError
     }
 }
 
+fn nativeOpen(allocator: std.mem.Allocator, args: []const Value) InterpreterError!Value {
+    _ = allocator;
+    if (args.len != 2) return InterpreterError.RuntimeError;
+    if (args[0] != .String or args[1] != .String) return InterpreterError.TypeError;
+
+    const path = args[0].String;
+    const mode = args[1].String;
+
+    if (std.mem.eql(u8, mode, "r")) {
+        const file = std.fs.cwd().openFile(path, .{}) catch return InterpreterError.RuntimeError;
+        return Value{ .File = file };
+    } else if (std.mem.eql(u8, mode, "w")) {
+        const file = std.fs.cwd().createFile(path, .{}) catch return InterpreterError.RuntimeError;
+        return Value{ .File = file };
+    }
+    return InterpreterError.RuntimeError;
+}
+
 pub const Interpreter = struct {
     globals: *Environment,
     environment: *Environment,
@@ -78,6 +96,7 @@ pub const Interpreter = struct {
     pub fn init(allocator: std.mem.Allocator) !Interpreter {
         const globals = try Environment.init(allocator, null);
         try globals.define("len", Value{ .NativeFunction = nativeLen });
+        try globals.define("open", Value{ .NativeFunction = nativeOpen });
         return Interpreter{
             .globals = globals,
             .environment = globals,
@@ -290,6 +309,29 @@ pub const Interpreter = struct {
                         }
                         return InterpreterError.RuntimeError;
                     },
+                    .String => |s| {
+                        if (std.mem.eql(u8, g.name, "strip")) {
+                            const ctx = try self.allocator.create([]const u8);
+                            ctx.* = s;
+                            return Value{ .Function = .{
+                                .name = "__str_strip__",
+                                .params = &[_][]const u8{},
+                                .body = &[_]Stmt{},
+                                .closure = @as(*anyopaque, @ptrCast(ctx)),
+                            }};
+                        }
+                        if (std.mem.eql(u8, g.name, "split")) {
+                            const ctx = try self.allocator.create([]const u8);
+                            ctx.* = s;
+                            return Value{ .Function = .{
+                                .name = "__str_split__",
+                                .params = @as([]const []const u8, &[_][]const u8{"delimiter"}),
+                                .body = &[_]Stmt{},
+                                .closure = @as(*anyopaque, @ptrCast(ctx)),
+                            }};
+                        }
+                        return InterpreterError.RuntimeError;
+                    },
                     .List => |list| {
                         if (std.mem.eql(u8, g.name, "append")) {
                             // Hack: Return a special function for append
@@ -299,6 +341,36 @@ pub const Interpreter = struct {
                                 .params = @as([]const []const u8, &[_][]const u8{"item"}), // Dummy param
                                 .body = &[_]Stmt{}, // Empty body
                                 .closure = @as(*anyopaque, @ptrCast(list)),
+                            }};
+                        }
+                        return InterpreterError.RuntimeError;
+                    },
+                    .File => |f| {
+                        const ctx = try self.allocator.create(std.fs.File);
+                        ctx.* = f;
+                        
+                        if (std.mem.eql(u8, g.name, "read")) {
+                             return Value{ .Function = .{
+                                .name = "__file_read__",
+                                .params = &[_][]const u8{}, 
+                                .body = &[_]Stmt{},
+                                .closure = @as(*anyopaque, @ptrCast(ctx)),
+                            }};
+                        }
+                        if (std.mem.eql(u8, g.name, "write")) {
+                             return Value{ .Function = .{
+                                .name = "__file_write__",
+                                .params = @as([]const []const u8, &[_][]const u8{"data"}),
+                                .body = &[_]Stmt{},
+                                .closure = @as(*anyopaque, @ptrCast(ctx)),
+                            }};
+                        }
+                         if (std.mem.eql(u8, g.name, "close")) {
+                             return Value{ .Function = .{
+                                .name = "__file_close__",
+                                .params = &[_][]const u8{},
+                                .body = &[_]Stmt{},
+                                .closure = @as(*anyopaque, @ptrCast(ctx)),
                             }};
                         }
                         return InterpreterError.RuntimeError;
@@ -385,6 +457,49 @@ pub const Interpreter = struct {
                 return native(self.allocator, evaluatedArgs.items);
             },
             .Function => |func| {
+                if (std.mem.eql(u8, func.name, "__file_read__")) {
+                    const filePtr = @as(*std.fs.File, @ptrCast(@alignCast(func.closure)));
+                    const content = filePtr.readToEndAlloc(self.allocator, 1024 * 1024 * 10) catch return InterpreterError.RuntimeError;
+                    return Value{ .String = content };
+                }
+                if (std.mem.eql(u8, func.name, "__file_write__")) {
+                    if (args.len != 1) return InterpreterError.RuntimeError;
+                    const val = try self.evaluate(args[0]);
+                    if (val != .String) return InterpreterError.TypeError;
+                    const filePtr = @as(*std.fs.File, @ptrCast(@alignCast(func.closure)));
+                    filePtr.writeAll(val.String) catch return InterpreterError.RuntimeError;
+                    return Value{ .Nil = {} };
+                }
+                if (std.mem.eql(u8, func.name, "__file_close__")) {
+                    const filePtr = @as(*std.fs.File, @ptrCast(@alignCast(func.closure)));
+                    filePtr.close();
+                    return Value{ .Nil = {} };
+                }
+
+                if (std.mem.eql(u8, func.name, "__str_strip__")) {
+                    if (args.len != 0) return InterpreterError.RuntimeError;
+                    const strPtr = @as(*[]const u8, @ptrCast(@alignCast(func.closure)));
+                    const trimmed = std.mem.trim(u8, strPtr.*, " \t\r\n");
+                    return Value{ .String = try self.allocator.dupe(u8, trimmed) };
+                }
+                if (std.mem.eql(u8, func.name, "__str_split__")) {
+                    if (args.len != 1) return InterpreterError.RuntimeError;
+                    const strPtr = @as(*[]const u8, @ptrCast(@alignCast(func.closure)));
+                    const delimVal = try self.evaluate(args[0]);
+                    if (delimVal != .String) return InterpreterError.TypeError;
+
+                    var parts = std.ArrayList(Value){};
+                    // Use splitSequence for string delimiter support
+                    var iter = std.mem.splitSequence(u8, strPtr.*, delimVal.String);
+                    while (iter.next()) |part| {
+                        try parts.append(self.allocator, Value{ .String = try self.allocator.dupe(u8, part) });
+                    }
+                    
+                    const list = try self.allocator.create(AST.LoxList);
+                    list.* = AST.LoxList{ .elements = parts };
+                    return Value{ .List = list };
+                }
+
                 if (std.mem.eql(u8, func.name, "__list_append__")) {
                     if (args.len != 1) return InterpreterError.RuntimeError;
                     const list = @as(*AST.LoxList, @ptrCast(@alignCast(func.closure)));
@@ -481,6 +596,7 @@ pub const Interpreter = struct {
             .Class => return true,
             .Instance => return true,
             .List => |l| return l.elements.items.len > 0,
+            .File => return true,
         }
     }
 
@@ -497,6 +613,7 @@ pub const Interpreter = struct {
              .Class => |c1| return c1 == b.Class,
              .Instance => |inst1| return inst1 == b.Instance,
              .List => |l1| return l1 == b.List, // Identity check
+             .File => |f1| return f1.handle == b.File.handle,
         }
     }
 };
