@@ -307,7 +307,13 @@ pub const Compiler = struct {
                 try self.emitOp(.Call);
                 try self.emitU8(@as(u8, @intCast(args.len)));
             },
-            .Get, .Set => return CompileError.UnsupportedFeature,
+            .Get => |*g| {
+                try self.compileExpr(@constCast(g.object));
+                const idx = try self.chunk.addConstant(self.allocator, Value{ .String = g.name });
+                try self.emitOp(.GetAttr);
+                try self.emitU16(idx);
+            },
+            .Set => return CompileError.UnsupportedFeature,
             .This => |t| {
                 if (t.depth > 0) return CompileError.UnsupportedFeature;
                 if (t.depth == 0) {
@@ -338,7 +344,16 @@ pub const Compiler = struct {
                 try self.emitOp(.BuildList);
                 try self.emitU16(@as(u16, @intCast(elems.len)));
             },
-            .DictLiteral => return CompileError.UnsupportedFeature,
+            .DictLiteral => |*d| {
+                const keys = @constCast(d.keys);
+                const values = @constCast(d.values);
+                for (keys, 0..) |_, i| {
+                    try self.compileExpr(&keys[i]);
+                    try self.compileExpr(&values[i]);
+                }
+                try self.emitOp(.BuildDict);
+                try self.emitU16(@as(u16, @intCast(keys.len)));
+            },
             .Subscript => |*s| {
                 try self.compileExpr(@constCast(s.value));
                 try self.compileExpr(@constCast(s.index));

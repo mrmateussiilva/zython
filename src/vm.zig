@@ -293,6 +293,22 @@ pub const VM = struct {
                     list.* = AST.LoxList{ .elements = elements };
                     try self.push(Value{ .List = list });
                 },
+                .BuildDict => {
+                    const count = self.readU16(frame, code);
+                    if (self.stack.items.len < count * 2) return VMError.RuntimeError;
+                    const start = self.stack.items.len - (count * 2);
+                    const dict = try self.allocator.create(AST.LoxDict);
+                    dict.* = AST.LoxDict.init(self.allocator);
+
+                    var i: usize = 0;
+                    while (i < count) : (i += 1) {
+                        const key = self.stack.items[start + (i * 2)];
+                        const value = self.stack.items[start + (i * 2) + 1];
+                        try dict.put(key, value);
+                    }
+                    self.stack.items.len = start;
+                    try self.push(Value{ .Dict = dict });
+                },
                 .GetSubscript => {
                     const index = self.pop();
                     const obj = self.pop();
