@@ -24,12 +24,19 @@ const CallFrame = struct {
     base: usize,
 };
 
+const TryFrame = struct {
+    frame_index: usize,
+    handler_ip: usize,
+    stack_len: usize,
+};
+
 pub const VM = struct {
     allocator: std.mem.Allocator,
     globals: *std.StringHashMap(Value),
     owns_globals: bool,
     stack: std.ArrayList(Value),
     frames: std.ArrayList(CallFrame),
+    try_stack: std.ArrayList(TryFrame),
 
     pub fn init(allocator: std.mem.Allocator) !VM {
         const globals = try allocator.create(std.StringHashMap(Value));
@@ -42,6 +49,7 @@ pub const VM = struct {
             .owns_globals = true,
             .stack = std.ArrayList(Value){},
             .frames = std.ArrayList(CallFrame){},
+            .try_stack = std.ArrayList(TryFrame){},
         };
     }
 
@@ -52,6 +60,7 @@ pub const VM = struct {
             .owns_globals = false,
             .stack = std.ArrayList(Value){},
             .frames = std.ArrayList(CallFrame){},
+            .try_stack = std.ArrayList(TryFrame){},
         };
     }
 
@@ -62,6 +71,7 @@ pub const VM = struct {
         }
         self.stack.deinit(self.allocator);
         self.frames.deinit(self.allocator);
+        self.try_stack.deinit(self.allocator);
     }
 
     pub fn interpret(self: *VM, func: *BytecodeFunction) VMError!void {
@@ -202,6 +212,33 @@ pub const VM = struct {
                     const arg_count = self.readU8(frame, code);
                     try self.callValue(arg_count);
                 },
+                .TryBegin => {
+                    const offset = self.readU16(frame, code);
+                    const handler_ip = frame.ip + offset;
+                    const tf = TryFrame{
+                        .frame_index = self.frames.items.len - 1,
+                        .handler_ip = handler_ip,
+                        .stack_len = self.stack.items.len,
+                    };
+                    try self.try_stack.append(self.allocator, tf);
+                },
+                .TryEnd => {
+                    _ = self.try_stack.pop() orelse return VMError.RuntimeError;
+                },
+                .Raise => {
+                    _ = self.pop();
+                    if (self.try_stack.items.len == 0) return VMError.RuntimeError;
+
+                    const tf = self.try_stack.pop() orelse return VMError.RuntimeError;
+                    while (self.frames.items.len - 1 > tf.frame_index) {
+                        _ = self.frames.pop() orelse return VMError.RuntimeError;
+                    }
+                    if (self.frames.items.len == 0) return VMError.RuntimeError;
+
+                    self.stack.items.len = tf.stack_len;
+                    frame = &self.frames.items[self.frames.items.len - 1];
+                    frame.ip = tf.handler_ip;
+                },
                 .GetAttr => {
                     const idx = self.readU16(frame, code);
                     const name = frame.func.chunk.constants.items[idx];
@@ -313,6 +350,11 @@ pub const VM = struct {
                 .Return => {
                     const result = self.pop();
                     const finished = self.frames.pop() orelse return VMError.RuntimeError;
+                    while (self.try_stack.items.len > 0) {
+                        const top = self.try_stack.items[self.try_stack.items.len - 1];
+                        if (top.frame_index != self.frames.items.len) break;
+                        _ = self.try_stack.pop() orelse break;
+                    }
                     if (self.frames.items.len == 0) {
                         return result;
                     }

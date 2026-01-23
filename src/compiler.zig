@@ -260,7 +260,20 @@ pub const Compiler = struct {
                 }
                 try self.emitOp(.Return);
             },
-            .Class, .Raise, .Try => return CompileError.UnsupportedFeature,
+            .Raise => |*r| {
+                try self.compileExpr(&r.value);
+                try self.emitOp(.Raise);
+            },
+            .Try => |*t| {
+                const handler_pos = try self.emitJump(.TryBegin);
+                try self.compileStmt(@constCast(t.try_branch));
+                try self.emitOp(.TryEnd);
+                const end_jump = try self.emitJump(.Jump);
+                self.patchJump(handler_pos);
+                try self.compileStmt(@constCast(t.except_branch));
+                self.patchJump(end_jump);
+            },
+            .Class => return CompileError.UnsupportedFeature,
         }
     }
 
