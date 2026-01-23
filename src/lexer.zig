@@ -12,6 +12,7 @@ pub const Lexer = struct {
     indent_stack: std.ArrayList(usize),
     pending_dedents: usize = 0, // Unused now
     at_line_start: bool = true,
+    eof_emitted: bool = false,
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator, source: []const u8) Lexer {
@@ -126,6 +127,17 @@ pub const Lexer = struct {
     }
 
     pub fn nextToken(self: *Lexer) !Token {
+        if (self.eof_emitted) return self.makeToken(.Eof);
+
+        if (self.isAtEnd()) {
+            if (self.indent_stack.items.len > 1) {
+                _ = self.indent_stack.pop();
+                return self.makeToken(.Dedent);
+            }
+            self.eof_emitted = true;
+            return self.makeToken(.Eof);
+        }
+
         if (self.at_line_start) {
             if (try self.handleIndentation()) |token| {
                 if (token.type == .Indent) self.at_line_start = false;
@@ -136,8 +148,6 @@ pub const Lexer = struct {
 
         self.skipWhitespace();
         self.start = self.current;
-
-        if (self.isAtEnd()) return self.makeToken(.Eof);
 
         const c = self.advance();
 
