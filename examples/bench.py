@@ -7,7 +7,7 @@ def fib(n):
 
 
 # Func call + recursion
-x = fib(20)
+x = fib(35)
 
 # Loop + arithmetic + locals
 s = 0
